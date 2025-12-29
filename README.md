@@ -38,6 +38,8 @@ This layout is efficient because it:
 - Keeps hot queries narrow (scan only the relevant component table).
 - Allows partial reconstruction; if parsing fails, raw bytes are still preserved via the raw tail/raw frame.
 
+`raw_tail` stores the payload bytes that follow the parsed headers, starting at `tail_offset`. This preserves unparsed data and enables full frame reconstruction without storing the entire frame in every layer table.
+
 ## Enhancements (Planned)
 
 - Efficient PCAP retrieval through JOIN operations and bulk decodes (currently decode per-packet).
