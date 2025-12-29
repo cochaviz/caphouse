@@ -1,0 +1,173 @@
+package caphouse
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"caphouse/components"
+)
+
+// InitSchema creates the database and tables if they do not exist.
+func (c *Client) InitSchema(ctx context.Context) error {
+	if c.DB == "" {
+		return errors.New("database is required")
+	}
+
+	db := quoteIdent(c.DB)
+	if err := c.conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", db)); err != nil {
+		return fmt.Errorf("create database: %w", err)
+	}
+
+	capturesTable := c.capturesTable()
+	packetsTable := c.packetsTable()
+	ethernetTable := c.ethernetTable()
+	dot1qTable := c.dot1qTable()
+	linuxSLLTable := c.linuxSLLTable()
+	ipv4Table := c.ipv4Table()
+	ipv4OptionsTable := c.ipv4OptionsTable()
+	ipv6Table := c.ipv6Table()
+	ipv6ExtTable := c.ipv6ExtTable()
+	rawTailTable := c.rawTailTable()
+
+	createCaptures := fmt.Sprintf(`
+CREATE TABLE IF NOT EXISTS %s
+(
+  capture_id UUID,
+  sensor_id LowCardinality(String),
+  created_at DateTime64(3),
+  endianness Enum8('le' = 1, 'be' = 2),
+  snaplen UInt32,
+  linktype UInt32,
+  time_res Enum8('us' = 1),
+  global_header_raw String,
+  codec_version UInt16,
+  codec_profile LowCardinality(String)
+)
+ENGINE = MergeTree
+ORDER BY (sensor_id, created_at, capture_id)`, capturesTable)
+
+	if err := c.conn.Exec(ctx, createCaptures); err != nil {
+		return fmt.Errorf("create captures table: %w", err)
+	}
+
+	createPackets := fmt.Sprintf(`
+CREATE TABLE IF NOT EXISTS %s
+(
+  capture_id UUID,
+  packet_id UInt64,
+  ts DateTime64(9),
+  incl_len UInt32,
+  orig_len UInt32,
+  components UInt128,
+  tail_offset UInt16,
+  frame_raw String CODEC(ZSTD),
+  frame_hash FixedString(32) CODEC(ZSTD)
+)
+ENGINE = MergeTree
+PARTITION BY toDate(ts)
+ORDER BY (capture_id, packet_id)`, packetsTable)
+
+	if err := c.conn.Exec(ctx, createPackets); err != nil {
+		return fmt.Errorf("create packets table: %w", err)
+	}
+
+	if err := c.conn.Exec(ctx, components.EthernetSchema(ethernetTable)); err != nil {
+		return fmt.Errorf("create ethernet table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.Dot1QSchema(dot1qTable)); err != nil {
+		return fmt.Errorf("create dot1q table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.LinuxSLLSchema(linuxSLLTable)); err != nil {
+		return fmt.Errorf("create linux sll table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.IPv4Schema(ipv4Table)); err != nil {
+		return fmt.Errorf("create ipv4 table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.IPv4OptionsSchema(ipv4OptionsTable)); err != nil {
+		return fmt.Errorf("create ipv4 options table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.IPv6Schema(ipv6Table)); err != nil {
+		return fmt.Errorf("create ipv6 table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.IPv6ExtSchema(ipv6ExtTable)); err != nil {
+		return fmt.Errorf("create ipv6 ext table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.RawTailSchema(rawTailTable)); err != nil {
+		return fmt.Errorf("create raw tail table: %w", err)
+	}
+
+	indexes := []string{
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_capture (capture_id) TYPE set(10000) GRANULARITY 1", packetsTable),
+	}
+	indexes = append(indexes, components.IPv4Indexes(ipv4Table)...)
+	indexes = append(indexes, components.IPv6Indexes(ipv6Table)...)
+	for _, stmt := range indexes {
+		if err := c.conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("add index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) capturesTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_captures"))
+}
+
+func (c *Client) packetsTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_packets"))
+}
+
+func (c *Client) ethernetTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ethernet"))
+}
+
+func (c *Client) dot1qTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_dot1q"))
+}
+
+func (c *Client) linuxSLLTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_linuxsll"))
+}
+
+func (c *Client) ipv4Table() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv4"))
+}
+
+func (c *Client) ipv4OptionsTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv4_options"))
+}
+
+func (c *Client) ipv6Table() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv6"))
+}
+
+func (c *Client) ipv6ExtTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv6_ext"))
+}
+
+func (c *Client) rawTailTable() string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_raw_tail"))
+}
+
+func quoteIdent(name string) string {
+	return "`" + name + "`"
+}
+
+func validateIdent(name string) error {
+	if name == "" {
+		return errors.New("identifier is empty")
+	}
+	for _, r := range name {
+		switch {
+		case r == '_':
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		default:
+			return fmt.Errorf("invalid identifier: %q", name)
+		}
+	}
+	return nil
+}
