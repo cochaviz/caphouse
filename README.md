@@ -21,6 +21,16 @@ caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --fil
 caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
 ```
 
+Using tcpdump:
+```
+tcpdump -i en0 -w - | caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --capture new
+```
+
+Using tcpreplay:
+```
+caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -
+```
+
 Notes:
 - HTTP DSNs are not supported; use `clickhouse://` with the native port.
 - Test fixtures live under `testdata/`.

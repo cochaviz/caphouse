@@ -46,7 +46,9 @@ func rootCmd() *cobra.Command {
 		Use:   "caphouse",
 		Short: "Store and export classic PCAPs in ClickHouse",
 		Example: `  caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap
-  caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap`,
+  caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
+  tcpdump -i en0 -w - | caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --capture new
+  caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
