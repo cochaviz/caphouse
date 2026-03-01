@@ -16,6 +16,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"github.com/spf13/cobra/doc"
 )
 
 func main() {
@@ -39,10 +40,32 @@ func rootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "caphouse",
 		Short: "Store and export classic PCAPs in ClickHouse",
-		Example: `  caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap --sensor test
-  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
-  tcpdump -i en0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test
-  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -`,
+		Long: `caphouse stores and exports classic PCAP files in ClickHouse.
+
+Instead of writing raw frames to disk, it parses each packet into its protocol
+layers and stores each layer in its own ClickHouse table. This makes packet data
+queryable at the column level while still allowing lossless PCAP reconstruction.
+
+Modes:
+  -r (default)  Read a PCAP file or stream and ingest it into ClickHouse.
+  -w         	Export a stored capture back as a PCAP file or stream.
+
+The DSN must use the native ClickHouse protocol (clickhouse://host:9000/db).
+HTTP connections are not supported.`,
+		Example: `  # Ingest a file (new capture; UUID printed on completion)
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost --file=capture.pcap
+
+  # Append packets to an existing capture
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost --file=more.pcap --capture=<uuid>
+
+  # Pipe from tcpdump
+  tcpdump -i eth0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost
+
+  # Export to a file
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> --file=out.pcap
+
+  # Stream into tcpreplay
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> | tcpreplay --intf1=eth0 -`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
@@ -131,17 +154,17 @@ func rootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dsn, "dsn", "", "clickhouse DSN or host:port (or CAPHOUSE_DSN, required)")
-	cmd.Flags().StringVar(&database, "db", "", "clickhouse database (or CAPHOUSE_DB/CAPHOUSE_DATABASE)")
-	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "packets per batch insert")
-	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "batch flush interval")
-	cmd.Flags().BoolVar(&debug, "debug", false, "enable ClickHouse driver debug logging")
+	cmd.Flags().StringVar(&dsn, "dsn", "", "ClickHouse DSN, e.g. clickhouse://user:pass@host:9000/db (or CAPHOUSE_DSN)")
+	cmd.Flags().StringVar(&database, "db", "", "ClickHouse database; falls back to the database in the DSN (or CAPHOUSE_DB, CAPHOUSE_DATABASE)")
+	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "packets per ClickHouse batch insert")
+	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "maximum time between batch flushes")
+	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging to stderr")
 
-	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "read PCAP from file/stdin and write into ClickHouse (default)")
-	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "read from ClickHouse and write PCAP to file/stdout")
-	cmd.Flags().StringVar(&filePath, "file", "-", "file path for read/write, or - for stdin/stdout")
-	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID or 'new' for read; required for write")
-	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor identifier (or CAPHOUSE_SENSOR) for read")
+	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "ingest PCAP from file or stdin into ClickHouse (default mode)")
+	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
+	cmd.Flags().StringVar(&filePath, "file", "-", "input/output file path; - for stdin/stdout")
+	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
+	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture, required in read mode (or CAPHOUSE_SENSOR)")
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if err == nil {
@@ -149,6 +172,20 @@ func rootCmd() *cobra.Command {
 		}
 		_ = cmd.Usage()
 		return err
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:    "gen-man [directory]",
+		Short:  "Generate man page into directory",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := os.MkdirAll(args[0], 0o755); err != nil {
+				return err
+			}
+			header := &doc.GenManHeader{Title: "CAPHOUSE", Section: "1"}
+			return doc.GenManTree(cmd, header, args[0])
+		},
 	})
 
 	return cmd
