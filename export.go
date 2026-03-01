@@ -512,9 +512,6 @@ func debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.Pa
 }
 
 func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl uint32, orig uint32, frame []byte) error {
-	if incl == 0 {
-		incl = uint32(len(frame))
-	}
 	if incl != uint32(len(frame)) {
 		incl = uint32(len(frame))
 	}

@@ -56,7 +56,7 @@ var OrderRepeatable = map[uint]bool{
 	OrderL3Ext: true,
 }
 
-// PacketNucleus represents the terminator row in pcap_packets.
+// PacketNucleus represents the primary row in pcap_packets, holding per-packet metadata and the component bitmask.
 type PacketNucleus struct {
 	CaptureID uuid.UUID
 	PacketID  uint64

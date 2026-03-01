@@ -7,42 +7,67 @@ Status: experimental.
 ## Usage
 
 Modes:
-- `read`: read PCAP from file/stdin and write into ClickHouse
+
+- `read`: read PCAP from file/stdin and write into ClickHouse (`--mode` defaults to `read`)
 - `write`: read from ClickHouse and write PCAP to file/stdout
 
 Required flags:
+
 - `--dsn` (or `CAPHOUSE_DSN`)
 - `--sensor` for `read`
 - `--capture` for `write`
 
+In `read` mode, `--capture` is optional:
+
+- Omit it (or pass `--capture new`) to create a new capture; its UUID is printed on completion.
+- Pass an existing UUID to append packets to that capture.
+
 Examples:
+
 ```
-caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap --sensor test --capture new
+# Ingest a file (new capture, UUID printed on completion)
+caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap --sensor test
+
+# Ingest a file into an existing capture
+caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file extra.pcap --sensor test --capture <uuid>
+
+# Export a capture
 caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
 ```
 
-Using tcpdump:
+Using tcpdump (pipe stdin):
+
 ```
-tcpdump -i en0 -w - | caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --capture new
+tcpdump -i en0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test
+```
+
+Live capture directly (no tcpdump needed):
+
+```
+caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --iface en0 --bpf "tcp port 80" --duration 60s
 ```
 
 Using tcpreplay:
+
 ```
 caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -
 ```
 
 Notes:
+
 - HTTP DSNs are not supported; use `clickhouse://` with the native port.
 - Test fixtures live under `testdata/`.
 
 ## Component Storage Model
 
 Packets are stored in a normalized, component-based schema:
+
 - `pcap_packets` holds the nucleus (timestamps, lengths, component bitmask, optional raw frame/hash).
 - Protocol layers (Ethernet, Dot1Q, IPv4/IPv6, IPv6 ext, raw tail) live in separate tables keyed by `(capture_id, packet_id)`.
 - A bitmask in `pcap_packets.components` indicates which component rows exist.
 
 This layout is efficient because it:
+
 - Avoids rewriting large raw frames for every query; only the required layers are touched.
 - Enables columnar compression on per-layer fields (e.g., IPs, ports, VLAN IDs).
 - Keeps hot queries narrow (scan only the relevant component table).
@@ -53,5 +78,5 @@ This layout is efficient because it:
 ## Enhancements (Planned)
 
 - Efficient PCAP retrieval through JOIN operations and bulk decodes (currently decode per-packet).
-- Code quality improvements in `export.go` (currently very bare-bones) and `ingest.go` (abstractions available but not yet used).
+- Use the `CreateBatch` abstraction in `components` from `ingest.go` (currently unused).
 - Increase test coverage.

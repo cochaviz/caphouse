@@ -380,9 +380,6 @@ VALUES`, c.rawTailTable())
 }
 
 func normalizePacket(p *Packet) {
-	if p.InclLen == 0 {
-		p.InclLen = uint32(len(p.Frame))
-	}
 	if p.InclLen != uint32(len(p.Frame)) {
 		p.InclLen = uint32(len(p.Frame))
 	}
