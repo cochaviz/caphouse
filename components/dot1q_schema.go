@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS %s
   vlan_id UInt16,
   eth_type UInt16
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id, tag_index)`, table)
 }
 

@@ -72,6 +72,6 @@ CREATE TABLE IF NOT EXISTS %s
   tail_offset UInt16,
   bytes String CODEC(ZSTD)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id)`, table)
 }

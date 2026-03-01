@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS %s
   ipv6_flow_label UInt32,
   ipv6_traffic_class UInt8
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 PARTITION BY toDate(ts)
 ORDER BY (toDate(ts), protocol, dst_ip_v6, capture_id, packet_id)`, table)
 }

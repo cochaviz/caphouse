@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/netip"
 	"time"
 
@@ -93,7 +94,7 @@ func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) er
 	c.batch = nil
 	c.lastFlush = time.Now()
 	c.mu.Unlock()
-	return c.insertBatch(ctx, batch)
+	return c.insertBatchWithRetry(ctx, batch)
 }
 
 // Flush sends any buffered packets to ClickHouse.
@@ -107,7 +108,38 @@ func (c *Client) Flush(ctx context.Context) error {
 	c.batch = nil
 	c.lastFlush = time.Now()
 	c.mu.Unlock()
-	return c.insertBatch(ctx, batch)
+	return c.insertBatchWithRetry(ctx, batch)
+}
+
+const (
+	retryBaseDelay    = 500 * time.Millisecond
+	retryMaxDelay     = 30 * time.Second
+	retryMaxAttempts  = 5
+)
+
+func (c *Client) insertBatchWithRetry(ctx context.Context, batch []CodecPacket) error {
+	var lastErr error
+	delay := retryBaseDelay
+	for attempt := 0; attempt < retryMaxAttempts; attempt++ {
+		if attempt > 0 {
+			jitter := time.Duration(rand.Int64N(int64(delay / 2)))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay/2 + jitter):
+			}
+			if delay *= 2; delay > retryMaxDelay {
+				delay = retryMaxDelay
+			}
+		}
+		if lastErr = c.insertBatch(ctx, batch); lastErr == nil {
+			return nil
+		}
+		if errors.Is(lastErr, context.Canceled) || errors.Is(lastErr, context.DeadlineExceeded) {
+			return lastErr
+		}
+	}
+	return fmt.Errorf("batch insert failed after %d attempts: %w", retryMaxAttempts, lastErr)
 }
 
 func (c *Client) insertBatch(ctx context.Context, batch []CodecPacket) error {

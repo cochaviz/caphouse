@@ -79,6 +79,6 @@ CREATE TABLE IF NOT EXISTS %s
   l2_len UInt16,
   l2_hdr_raw String CODEC(ZSTD)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id)`, table)
 }

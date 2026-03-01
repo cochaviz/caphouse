@@ -131,6 +131,6 @@ CREATE TABLE IF NOT EXISTS %s
 
   options_raw String CODEC(ZSTD)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id)`, table)
 }

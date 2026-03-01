@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS %s
   ipv4_ttl UInt8,
   ipv4_hdr_checksum UInt16
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 PARTITION BY toDate(ts)
 ORDER BY (toDate(ts), protocol, dst_ip_v4, capture_id, packet_id)`, table)
 }

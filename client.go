@@ -20,8 +20,7 @@ const (
 // Client wraps a ClickHouse connection with batch ingest and export helpers.
 type Client struct {
 	conn clickhouse.Conn
-	cfg  Config
-	DB   string
+	cfg  Config // cfg.Database is always the resolved database name after New()
 
 	mu        sync.Mutex
 	batch     []CodecPacket
@@ -73,19 +72,19 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("clickhouse ping: %w", err)
 	}
 
-	client := &Client{
-		conn:      conn,
-		cfg:       cfg,
-		DB:        cfg.Database,
-		lastFlush: time.Now(),
+	// Resolve the database name: explicit config takes precedence over DSN,
+	// both of which were already merged into opts.Auth.Database above.
+	if cfg.Database == "" {
+		cfg.Database = opts.Auth.Database
 	}
-	if client.DB == "" {
-		client.DB = opts.Auth.Database
-	}
-	if err := validateIdent(client.DB); err != nil {
+	if err := validateIdent(cfg.Database); err != nil {
 		return nil, err
 	}
-	return client, nil
+	return &Client{
+		conn:      conn,
+		cfg:       cfg,
+		lastFlush: time.Now(),
+	}, nil
 }
 
 // Close closes the underlying connection.

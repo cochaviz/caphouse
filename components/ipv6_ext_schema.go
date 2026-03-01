@@ -88,6 +88,6 @@ CREATE TABLE IF NOT EXISTS %s
   ext_type UInt16,
   ext_raw String CODEC(ZSTD)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id, ext_index)`, table)
 }

@@ -13,7 +13,6 @@ import (
 	"caphouse"
 	"caphouse/components"
 
-	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -36,12 +35,6 @@ func rootCmd() *cobra.Command {
 	var capture string
 	var sensor string
 	var debug bool
-	var ifaceName string
-	var bpf string
-	var snaplen int
-	var promisc bool
-	var timeout time.Duration
-	var duration time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "caphouse",
@@ -87,19 +80,6 @@ func rootCmd() *cobra.Command {
 				captureID, isNew, err := parseCaptureID(capture, true)
 				if err != nil {
 					return err
-				}
-
-				if ifaceName != "" {
-					if filePath != "" && filePath != "-" {
-						return errors.New("--iface cannot be combined with --file for read")
-					}
-					if err := ingestFromInterface(ctx, client, captureID, effectiveSensor, ifaceName, bpf, snaplen, promisc, timeout, duration); err != nil {
-						return err
-					}
-					if isNew {
-						fmt.Fprintf(cmd.OutOrStdout(), "capture_id=%s\n", captureID)
-					}
-					return nil
 				}
 
 				src := io.Reader(os.Stdin)
@@ -162,13 +142,6 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&filePath, "file", "-", "file path for read/write, or - for stdin/stdout")
 	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID or 'new' for read; required for write")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor identifier (or CAPHOUSE_SENSOR) for read")
-
-	cmd.Flags().StringVar(&ifaceName, "iface", "", "optional interface name for live capture")
-	cmd.Flags().StringVar(&bpf, "bpf", "", "optional BPF filter for live capture")
-	cmd.Flags().IntVar(&snaplen, "snaplen", 65535, "capture snaplen for live capture")
-	cmd.Flags().BoolVar(&promisc, "promisc", false, "enable promiscuous mode for live capture")
-	cmd.Flags().DurationVar(&timeout, "timeout", time.Second, "read timeout for live capture")
-	cmd.Flags().DurationVar(&duration, "duration", 0, "duration for live capture (0 = until interrupted)")
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if err == nil {
@@ -238,71 +211,6 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 	}
 
 	return capID, nil
-}
-
-func ingestFromInterface(ctx context.Context, client *caphouse.Client, captureID uuid.UUID, sensor string, ifaceName string, bpf string, snaplen int, promisc bool, timeout time.Duration, duration time.Duration) error {
-	handle, err := pcap.OpenLive(ifaceName, int32(snaplen), promisc, timeout)
-	if err != nil {
-		return fmt.Errorf("open interface: %w", err)
-	}
-	defer handle.Close()
-
-	if bpf != "" {
-		if err := handle.SetBPFFilter(bpf); err != nil {
-			return fmt.Errorf("apply bpf: %w", err)
-		}
-	}
-
-	meta := caphouse.CaptureMeta{
-		CaptureID:      captureID,
-		SensorID:       sensor,
-		CreatedAt:      time.Now(),
-		Snaplen:        uint32(handle.SnapLen()),
-		LinkType:       uint32(handle.LinkType()),
-		Endianness:     "le",
-		TimeResolution: "us",
-		CodecVersion:   components.CodecVersionV1,
-		CodecProfile:   components.CodecProfileV1,
-	}
-
-	if _, err := client.CreateCapture(ctx, meta); err != nil {
-		return err
-	}
-
-	deadline := time.Time{}
-	if duration > 0 {
-		deadline = time.Now().Add(duration)
-	}
-
-	var packetID uint64
-	for {
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			break
-		}
-
-		data, ci, err := handle.ReadPacketData()
-		if errors.Is(err, pcap.NextErrorTimeoutExpired) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("read packet: %w", err)
-		}
-
-		packet := caphouse.Packet{
-			CaptureID: captureID,
-			PacketID:  packetID,
-			Timestamp: ci.Timestamp,
-			InclLen:   uint32(ci.CaptureLength),
-			OrigLen:   uint32(ci.Length),
-			Frame:     data,
-		}
-		if err := client.IngestPacket(ctx, meta.LinkType, packet); err != nil {
-			return err
-		}
-		packetID++
-	}
-
-	return client.Flush(ctx)
 }
 
 func newClient(ctx context.Context, dsn, database string, batchSize int, flushInterval time.Duration, debug bool) (*caphouse.Client, error) {

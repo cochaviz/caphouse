@@ -10,11 +10,11 @@ import (
 
 // InitSchema creates the database and tables if they do not exist.
 func (c *Client) InitSchema(ctx context.Context) error {
-	if c.DB == "" {
+	if c.cfg.Database == "" {
 		return errors.New("database is required")
 	}
 
-	db := quoteIdent(c.DB)
+	db := quoteIdent(c.cfg.Database)
 	if err := c.conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", db)); err != nil {
 		return fmt.Errorf("create database: %w", err)
 	}
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS %s
   codec_version UInt16,
   codec_profile LowCardinality(String)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 ORDER BY (sensor_id, created_at, capture_id)`, capturesTable)
 
 	if err := c.conn.Exec(ctx, createCaptures); err != nil {
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS %s
   frame_raw String CODEC(ZSTD),
   frame_hash FixedString(32) CODEC(ZSTD)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 PARTITION BY toDate(ts)
 ORDER BY (capture_id, packet_id)`, packetsTable)
 
@@ -111,45 +111,25 @@ ORDER BY (capture_id, packet_id)`, packetsTable)
 	return nil
 }
 
-func (c *Client) capturesTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_captures"))
+// tableRef returns a fully-qualified, backtick-quoted ClickHouse table reference.
+// SQL does not support ? placeholders for identifiers, so we interpolate with
+// fmt.Sprintf. This is safe because cfg.Database is the only variable component
+// and is validated as strictly alphanumeric+underscore by validateIdent in New().
+// All table names are hardcoded string literals.
+func (c *Client) tableRef(table string) string {
+	return fmt.Sprintf("%s.%s", quoteIdent(c.cfg.Database), quoteIdent(table))
 }
 
-func (c *Client) packetsTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_packets"))
-}
-
-func (c *Client) ethernetTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ethernet"))
-}
-
-func (c *Client) dot1qTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_dot1q"))
-}
-
-func (c *Client) linuxSLLTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_linuxsll"))
-}
-
-func (c *Client) ipv4Table() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv4"))
-}
-
-func (c *Client) ipv4OptionsTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv4_options"))
-}
-
-func (c *Client) ipv6Table() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv6"))
-}
-
-func (c *Client) ipv6ExtTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_ipv6_ext"))
-}
-
-func (c *Client) rawTailTable() string {
-	return fmt.Sprintf("%s.%s", quoteIdent(c.DB), quoteIdent("pcap_raw_tail"))
-}
+func (c *Client) capturesTable() string   { return c.tableRef("pcap_captures") }
+func (c *Client) packetsTable() string    { return c.tableRef("pcap_packets") }
+func (c *Client) ethernetTable() string   { return c.tableRef("pcap_ethernet") }
+func (c *Client) dot1qTable() string      { return c.tableRef("pcap_dot1q") }
+func (c *Client) linuxSLLTable() string   { return c.tableRef("pcap_linuxsll") }
+func (c *Client) ipv4Table() string       { return c.tableRef("pcap_ipv4") }
+func (c *Client) ipv4OptionsTable() string { return c.tableRef("pcap_ipv4_options") }
+func (c *Client) ipv6Table() string       { return c.tableRef("pcap_ipv6") }
+func (c *Client) ipv6ExtTable() string    { return c.tableRef("pcap_ipv6_ext") }
+func (c *Client) rawTailTable() string    { return c.tableRef("pcap_raw_tail") }
 
 func quoteIdent(name string) string {
 	return "`" + name + "`"

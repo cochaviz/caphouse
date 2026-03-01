@@ -79,7 +79,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 		return err
 	}
 
-	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash FROM %s WHERE capture_id = ? ORDER BY packet_id ASC", c.packetsTable())
+	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC", c.packetsTable())
 	rows, err := c.conn.Query(ctx, query, captureID)
 	if err != nil {
 		return fmt.Errorf("query packets: %w", err)
@@ -214,7 +214,7 @@ func (c *Client) fetchEthernet(ctx context.Context, captureID uuid.UUID, packetI
 }
 
 func (c *Client) fetchDot1Q(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]components.ClickhouseMappedDecoder, error) {
-	query := fmt.Sprintf("SELECT tag_index, priority, drop_eligible, vlan_id, eth_type FROM %s WHERE capture_id = ? AND packet_id = ? ORDER BY tag_index ASC", c.dot1qTable())
+	query := fmt.Sprintf("SELECT tag_index, priority, drop_eligible, vlan_id, eth_type FROM %s FINAL WHERE capture_id = ? AND packet_id = ? ORDER BY tag_index ASC", c.dot1qTable())
 	rows, err := c.conn.Query(ctx, query, captureID, packetID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch dot1q: %w", err)
@@ -391,7 +391,7 @@ FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1`, c.ipv6Table())
 }
 
 func (c *Client) fetchIPv6Ext(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]components.ClickhouseMappedDecoder, error) {
-	query := fmt.Sprintf("SELECT ext_index, ext_type, ext_raw FROM %s WHERE capture_id = ? AND packet_id = ? ORDER BY ext_index ASC", c.ipv6ExtTable())
+	query := fmt.Sprintf("SELECT ext_index, ext_type, ext_raw FROM %s FINAL WHERE capture_id = ? AND packet_id = ? ORDER BY ext_index ASC", c.ipv6ExtTable())
 	rows, err := c.conn.Query(ctx, query, captureID, packetID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch ipv6 ext: %w", err)

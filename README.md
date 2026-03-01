@@ -41,11 +41,25 @@ Using tcpdump (pipe stdin):
 tcpdump -i en0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test
 ```
 
-Live capture directly (no tcpdump needed):
+Continuous capture with bounded on-disk storage (rotation script):
 
+```sh
+#!/bin/sh
+# Rotate every 100 MB, keep 10 files (~1 GB ring), ingest each on close.
+DSN="clickhouse://user:pass@localhost:9000/default"
+SENSOR="myhost"
+DIR="/var/capture"
+
+tcpdump -i eth0 -G 0 -C 100 -W 10 -w "$DIR/ring" &
+TCPDUMP_PID=$!
+
+inotifywait -m -e close_write --format '%w%f' "$DIR" | while read -r FILE; do
+    caphouse --dsn="$DSN" --sensor="$SENSOR" --file="$FILE" && rm -f "$FILE"
+done
 ```
-caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --iface en0 --bpf "tcp port 80" --duration 60s
-```
+
+Packets are ingested from each closed file before tcpdump can overwrite it.
+On macOS, replace `inotifywait` with `fswatch -e Updated --event IsFile "$DIR"`.
 
 Using tcpreplay:
 
