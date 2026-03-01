@@ -8,8 +8,8 @@ Status: experimental.
 
 Modes:
 
-- `read`: read PCAP from file/stdin and write into ClickHouse (`--mode` defaults to `read`)
-- `write`: read from ClickHouse and write PCAP to file/stdout
+- `--read` / `-r`: read PCAP from file/stdin and write into ClickHouse (default, flag may be omitted)
+- `--write` / `-w`: read from ClickHouse and write PCAP to file/stdout
 
 Required flags:
 
@@ -32,7 +32,7 @@ caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pc
 caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file extra.pcap --sensor test --capture <uuid>
 
 # Export a capture
-caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
+caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
 ```
 
 Using tcpdump (pipe stdin):
@@ -50,7 +50,7 @@ caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --i
 Using tcpreplay:
 
 ```
-caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -
+caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -
 ```
 
 Notes:

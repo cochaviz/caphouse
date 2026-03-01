@@ -30,7 +30,8 @@ func rootCmd() *cobra.Command {
 	var database string
 	var batchSize int
 	var flushInterval time.Duration
-	var mode string
+	var readMode bool
+	var writeMode bool
 	var filePath string
 	var capture string
 	var sensor string
@@ -45,16 +46,20 @@ func rootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "caphouse",
 		Short: "Store and export classic PCAPs in ClickHouse",
-		Example: `  caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap
-  caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
-  tcpdump -i en0 -w - | caphouse --mode=read --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test --capture new
-  caphouse --mode=write --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -`,
+		Example: `  caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --file capture.pcap --sensor test
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> --file out.pcap
+  tcpdump -i en0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/default" --sensor test
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" --capture <uuid> | tcpreplay --intf1=en0 -`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			if mode == "" {
-				mode = "read"
+			if readMode && writeMode {
+				return errors.New("--read and --write are mutually exclusive")
+			}
+			mode := "read"
+			if writeMode {
+				mode = "write"
 			}
 
 			effectiveDSN := firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN"))
@@ -152,7 +157,8 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "batch flush interval")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable ClickHouse driver debug logging")
 
-	cmd.Flags().StringVar(&mode, "mode", "read", "mode: read or write")
+	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "read PCAP from file/stdin and write into ClickHouse (default)")
+	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "read from ClickHouse and write PCAP to file/stdout")
 	cmd.Flags().StringVar(&filePath, "file", "-", "file path for read/write, or - for stdin/stdout")
 	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID or 'new' for read; required for write")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor identifier (or CAPHOUSE_SENSOR) for read")
