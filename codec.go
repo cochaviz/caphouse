@@ -84,7 +84,7 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 		}
 	}
 
-	rawTail, err := (components.RawTailCodec{}).Encode(&nucleus, frame, tailOffset)
+	rawTail, err := components.EncodeRawTail(&nucleus, frame, tailOffset)
 	if err != nil {
 		return rawFrameFallback(nucleus, frame)
 	}

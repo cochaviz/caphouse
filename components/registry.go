@@ -6,15 +6,15 @@ import (
 )
 
 var LayerEncoders = map[gopacket.LayerType]LayerEncoder{
-	layers.LayerTypeEthernet:        ethernetLayerEncoder{},
-	layers.LayerTypeDot1Q:           dot1QLayerEncoder{},
-	layers.LayerTypeLinuxSLL:        linuxSLLLayerEncoder{},
-	layers.LayerTypeIPv4:            ipv4LayerEncoder{},
-	layers.LayerTypeIPv6:            ipv6LayerEncoder{},
-	layers.LayerTypeIPv6HopByHop:    ipv6ExtLayerEncoder{},
-	layers.LayerTypeIPv6Routing:     ipv6ExtLayerEncoder{},
-	layers.LayerTypeIPv6Fragment:    ipv6ExtLayerEncoder{},
-	layers.LayerTypeIPv6Destination: ipv6ExtLayerEncoder{},
+	layers.LayerTypeEthernet:        &EthernetComponent{},
+	layers.LayerTypeDot1Q:           &Dot1QComponent{},
+	layers.LayerTypeLinuxSLL:        &LinuxSLLComponent{},
+	layers.LayerTypeIPv4:            &IPv4Component{},
+	layers.LayerTypeIPv6:            &IPv6Component{},
+	layers.LayerTypeIPv6HopByHop:    &IPv6ExtComponent{},
+	layers.LayerTypeIPv6Routing:     &IPv6ExtComponent{},
+	layers.LayerTypeIPv6Fragment:    &IPv6ExtComponent{},
+	layers.LayerTypeIPv6Destination: &IPv6ExtComponent{},
 }
 
 func LayerSupported(layerType gopacket.LayerType) bool {

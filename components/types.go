@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/uuid"
@@ -117,7 +118,6 @@ type DecodeContext struct {
 
 // LayerEncoder defines the encoding contract for a gopacket layer.
 type LayerEncoder interface {
-	LayerType() gopacket.LayerType
 	Encode(gopacket.Layer) ([]ClickhouseMappedDecoder, error)
 }
 
@@ -175,6 +175,27 @@ func GetClickhouseColumnsFrom(v any) ([]string, error) {
 	}
 
 	return cols, nil
+}
+
+// ComponentFetcher extends ClickhouseMappedDecoder with SELECT/scan capability.
+type ComponentFetcher interface {
+	ClickhouseMappedDecoder
+	ScanColumns() []string
+	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
+	FetchFINAL() bool
+	FetchOrderBy() string
+}
+
+// ComponentFactories maps component kind constants to zero-value constructors.
+var ComponentFactories = map[uint]func() ComponentFetcher{
+	ComponentEthernet:    func() ComponentFetcher { return &EthernetComponent{} },
+	ComponentDot1Q:       func() ComponentFetcher { return &Dot1QComponent{} },
+	ComponentLinuxSLL:    func() ComponentFetcher { return &LinuxSLLComponent{} },
+	ComponentIPv4:        func() ComponentFetcher { return &IPv4Component{} },
+	ComponentIPv4Options: func() ComponentFetcher { return &IPv4OptionsComponent{} },
+	ComponentIPv6:        func() ComponentFetcher { return &IPv6Component{} },
+	ComponentIPv6Ext:     func() ComponentFetcher { return &IPv6ExtComponent{} },
+	ComponentRawTail:     func() ComponentFetcher { return &RawTailComponent{} },
 }
 
 func GetClickhouseValuesFrom(v any) ([]any, error) {

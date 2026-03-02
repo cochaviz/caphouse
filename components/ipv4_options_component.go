@@ -1,28 +1,33 @@
 package components
 
 import (
+	_ "embed"
 	"errors"
-	"fmt"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket/layers"
 	"github.com/google/uuid"
 )
 
+//go:embed ipv4_options_schema.sql
+var ipv4OptionsSchemaSQL string
+
 // IPv4OptionsComponent stores raw IPv4 options bytes.
 type IPv4OptionsComponent struct {
-	CaptureID    uuid.UUID
-	PacketID     uint64
-	CodecVersion uint16
-	OptionsRaw   []byte
+	CaptureID    uuid.UUID `ch:"capture_id"`
+	PacketID     uint64    `ch:"packet_id"`
+	CodecVersion uint16    `ch:"codec_version"`
+	OptionsRaw   []byte    `ch:"options_raw"`
 }
 
-func (c *IPv4OptionsComponent) Kind() uint {
-	return ComponentIPv4Options
-}
-
-func (c *IPv4OptionsComponent) Table() string {
-	return "pcap_ipv4_options"
-}
+func (c *IPv4OptionsComponent) Kind() uint           { return ComponentIPv4Options }
+func (c *IPv4OptionsComponent) Table() string        { return "pcap_ipv4_options" }
+func (c *IPv4OptionsComponent) Order() uint          { return OrderL3Options }
+func (c *IPv4OptionsComponent) Index() uint16        { return 0 }
+func (c *IPv4OptionsComponent) SetIndex(_ uint16)    {}
+func (c *IPv4OptionsComponent) HeaderLen() int       { return len(c.OptionsRaw) }
+func (c *IPv4OptionsComponent) FetchFINAL() bool     { return false }
+func (c *IPv4OptionsComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *IPv4OptionsComponent) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)
@@ -30,20 +35,6 @@ func (c *IPv4OptionsComponent) ClickhouseColumns() ([]string, error) {
 
 func (c *IPv4OptionsComponent) ClickhouseValues() ([]any, error) {
 	return GetClickhouseValuesFrom(c)
-}
-
-func (c *IPv4OptionsComponent) Order() uint {
-	return OrderL3Options
-}
-
-func (c *IPv4OptionsComponent) Index() uint16 {
-	return 0
-}
-
-func (c *IPv4OptionsComponent) SetIndex(_ uint16) {}
-
-func (c *IPv4OptionsComponent) HeaderLen() int {
-	return len(c.OptionsRaw)
 }
 
 func (c *IPv4OptionsComponent) ApplyNucleus(nucleus PacketNucleus) {
@@ -79,22 +70,35 @@ func (c *IPv4OptionsComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
+func (c *IPv4OptionsComponent) ScanColumns() []string {
+	return []string{"packet_id", "options_raw"}
+}
+
+func (c *IPv4OptionsComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+	var raw string
+	c.CaptureID = captureID
+	err := rows.Scan(&c.PacketID, &raw)
+	c.OptionsRaw = []byte(raw)
+	return c.PacketID, err
+}
+
+func newIPv4OptionsComponent(raw []byte) *IPv4OptionsComponent {
+	return &IPv4OptionsComponent{
+		CodecVersion: CodecVersionV1,
+		OptionsRaw:   copyBytes(raw),
+	}
+}
+
 func parseIPv4Options(raw []byte) ([]layers.IPv4Option, error) {
 	opts := make([]layers.IPv4Option, 0)
 	for i := 0; i < len(raw); {
 		optType := raw[i]
 		switch optType {
 		case 0:
-			opts = append(opts, layers.IPv4Option{
-				OptionType:   0,
-				OptionLength: 1,
-			})
+			opts = append(opts, layers.IPv4Option{OptionType: 0, OptionLength: 1})
 			i++
 		case 1:
-			opts = append(opts, layers.IPv4Option{
-				OptionType:   1,
-				OptionLength: 1,
-			})
+			opts = append(opts, layers.IPv4Option{OptionType: 1, OptionLength: 1})
 			i++
 		default:
 			if i+1 >= len(raw) {
@@ -121,16 +125,5 @@ func parseIPv4Options(raw []byte) ([]layers.IPv4Option, error) {
 }
 
 func IPv4OptionsSchema(table string) string {
-	return fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s
-(
-  capture_id UUID,
-  packet_id UInt64,
-
-  codec_version UInt16,
-
-  options_raw String CODEC(ZSTD)
-)
-ENGINE = ReplacingMergeTree
-ORDER BY (capture_id, packet_id)`, table)
+	return applySchema(ipv4OptionsSchemaSQL, table)
 }
