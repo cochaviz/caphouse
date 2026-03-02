@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -26,11 +25,9 @@ type captureMetaRow struct {
 	GlobalHeaderRaw []byte
 }
 
-// CountPackets returns the number of packets stored for the given capture.
-// The count is an estimate (no FINAL deduplication) and is suitable for
-// driving a progress bar.
+// CountPackets returns the deduplicated number of packets stored for the given capture.
 func (c *Client) CountPackets(ctx context.Context, captureID uuid.UUID) (int64, error) {
-	query := fmt.Sprintf("SELECT count() FROM %s WHERE capture_id = ?", c.packetsTable())
+	query := fmt.Sprintf("SELECT count() FROM %s FINAL WHERE capture_id = ?", c.packetsTable())
 	var n uint64
 	if err := c.conn.QueryRow(ctx, query, captureID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count packets: %w", err)
@@ -150,9 +147,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 			}
 			frame, err := ReconstructFrame(nucleus, componentList)
 			if err != nil {
-				if c.cfg.Debug {
-					debugPacketDump(captureID, row.packetID, nucleus, componentList)
-				}
+				c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
 				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
 			}
 			if err := writePacketRecord(buf, order, row.ts, row.incl, row.orig, frame); err != nil {
@@ -218,15 +213,11 @@ func (c *Client) fetchComponentBatch(
 	ctor func() components.ComponentFetcher,
 ) (map[uint64][]components.ClickhouseMappedDecoder, error) {
 	proto := ctor()
-	final := ""
-	if proto.FetchFINAL() {
-		final = "FINAL"
-	}
 	inClause, args := batchArgs(captureID, packetIDs)
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s %s WHERE capture_id = ? AND packet_id IN %s ORDER BY %s ASC",
+		"SELECT %s FROM %s FINAL WHERE capture_id = ? AND packet_id IN %s ORDER BY %s ASC",
 		strings.Join(proto.ScanColumns(), ", "),
-		c.tableRef(proto.Table()), final, inClause, proto.FetchOrderBy(),
+		c.tableRef(proto.Table()), inClause, proto.FetchOrderBy(),
 	)
 	rows, err := c.conn.Query(ctx, query, args...)
 	if err != nil {
@@ -246,16 +237,30 @@ func (c *Client) fetchComponentBatch(
 	return m, rows.Err()
 }
 
+type fetchResult struct {
+	kind uint
+	rows map[uint64][]components.ClickhouseMappedDecoder
+	err  error
+}
+
 func (c *Client) fetchComponentsForBatch(
 	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
 ) (map[uint]map[uint64][]components.ClickhouseMappedDecoder, error) {
-	all := make(map[uint]map[uint64][]components.ClickhouseMappedDecoder)
+	n := len(components.ComponentFactories)
+	results := make(chan fetchResult, n)
 	for kind, ctor := range components.ComponentFactories {
-		rows, err := c.fetchComponentBatch(ctx, captureID, packetIDs, ctor)
-		if err != nil {
-			return nil, err
+		go func() {
+			rows, err := c.fetchComponentBatch(ctx, captureID, packetIDs, ctor)
+			results <- fetchResult{kind, rows, err}
+		}()
+	}
+	all := make(map[uint]map[uint64][]components.ClickhouseMappedDecoder, n)
+	for range n {
+		r := <-results
+		if r.err != nil {
+			return nil, r.err
 		}
-		all[kind] = rows
+		all[r.kind] = r.rows
 	}
 	return all, nil
 }
@@ -301,39 +306,48 @@ func writePCAPHeader(w io.Writer, meta captureMetaRow) error {
 	return err
 }
 
-func debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.ClickhouseMappedDecoder) {
-	fmt.Fprintf(os.Stderr, "caphouse: debug packet capture_id=%s packet_id=%d\n", captureID, packetID)
-	fmt.Fprintf(os.Stderr, "caphouse: nucleus incl_len=%d orig_len=%d tail_offset=%d frame_raw_len=%d frame_hash_len=%d\n",
-		nucleus.InclLen, nucleus.OrigLen, nucleus.TailOffset, len(nucleus.FrameRaw), len(nucleus.FrameHash))
-	fmt.Fprintf(os.Stderr, "caphouse: components=%d mask=%v\n", len(comps), nucleus.Components)
+func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.ClickhouseMappedDecoder) {
+	c.log.Debug("packet reconstruction failed",
+		"capture_id", captureID,
+		"packet_id", packetID,
+		"incl_len", nucleus.InclLen,
+		"orig_len", nucleus.OrigLen,
+		"tail_offset", nucleus.TailOffset,
+		"frame_raw_len", len(nucleus.FrameRaw),
+		"frame_hash_len", len(nucleus.FrameHash),
+		"component_count", len(comps),
+		"mask", nucleus.Components,
+	)
 	for i, comp := range comps {
-		switch c := comp.(type) {
+		switch x := comp.(type) {
 		case *components.EthernetComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=ethernet src_mac_len=%d dst_mac_len=%d eth_type=%d eth_len=%d\n",
-				i, len(c.SrcMAC), len(c.DstMAC), c.EtherType, c.Length)
+			c.log.Debug("component", "index", i, "type", "ethernet",
+				"src_mac_len", len(x.SrcMAC), "dst_mac_len", len(x.DstMAC),
+				"eth_type", x.EtherType, "eth_len", x.Length)
 		case *components.Dot1QComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=dot1q tag_index=%d vlan_id=%d eth_type=%d\n",
-				i, c.TagIndex, c.VLANID, c.EtherType)
+			c.log.Debug("component", "index", i, "type", "dot1q",
+				"tag_index", x.TagIndex, "vlan_id", x.VLANID, "eth_type", x.EtherType)
 		case *components.LinuxSLLComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=linuxsll l2_len=%d l2_hdr_raw_len=%d\n",
-				i, c.L2Len, len(c.L2HdrRaw))
+			c.log.Debug("component", "index", i, "type", "linuxsll",
+				"l2_len", x.L2Len, "l2_hdr_raw_len", len(x.L2HdrRaw))
 		case *components.IPv4Component:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=ipv4 src=%s dst=%s ihl=%d total_len=%d\n",
-				i, c.SrcIP4, c.DstIP4, c.IPv4IHL, c.IPv4TotalLen)
+			c.log.Debug("component", "index", i, "type", "ipv4",
+				"src", x.SrcIP4, "dst", x.DstIP4,
+				"ihl", x.IPv4IHL, "total_len", x.IPv4TotalLen)
 		case *components.IPv4OptionsComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=ipv4_options len=%d\n",
-				i, len(c.OptionsRaw))
+			c.log.Debug("component", "index", i, "type", "ipv4_options",
+				"len", len(x.OptionsRaw))
 		case *components.IPv6Component:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=ipv6 src=%s dst=%s payload_len=%d\n",
-				i, c.SrcIP6, c.DstIP6, c.IPv6PayloadLen)
+			c.log.Debug("component", "index", i, "type", "ipv6",
+				"src", x.SrcIP6, "dst", x.DstIP6, "payload_len", x.IPv6PayloadLen)
 		case *components.IPv6ExtComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=ipv6_ext index=%d type=%d len=%d\n",
-				i, c.ExtIndex, c.ExtType, len(c.ExtRaw))
+			c.log.Debug("component", "index", i, "type", "ipv6_ext",
+				"ext_index", x.ExtIndex, "ext_type", x.ExtType, "len", len(x.ExtRaw))
 		case *components.RawTailComponent:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=raw_tail offset=%d len=%d\n",
-				i, c.TailOffset, len(c.Bytes))
+			c.log.Debug("component", "index", i, "type", "raw_tail",
+				"offset", x.TailOffset, "len", len(x.Bytes))
 		default:
-			fmt.Fprintf(os.Stderr, "caphouse: component[%d]=%T\n", i, comp)
+			c.log.Debug("component", "index", i, "type", fmt.Sprintf("%T", comp))
 		}
 	}
 }

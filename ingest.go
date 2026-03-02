@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -138,6 +139,12 @@ func (c *Client) insertBatchWithRetry(ctx context.Context, batch []CodecPacket) 
 		if errors.Is(lastErr, context.Canceled) || errors.Is(lastErr, context.DeadlineExceeded) {
 			return lastErr
 		}
+		c.log.Warn("batch insert failed, retrying",
+			"attempt", attempt+1,
+			"max", retryMaxAttempts,
+			"err", lastErr,
+			"next_delay", delay,
+		)
 	}
 	return fmt.Errorf("batch insert failed after %d attempts: %w", retryMaxAttempts, lastErr)
 }
@@ -195,12 +202,21 @@ VALUES`, c.packetsTable())
 		}
 	}
 
-	if err := nucleusBatch.Send(); err != nil {
-		return fmt.Errorf("send nucleus batch: %w", err)
+	allBatches := make(map[string]chdriver.Batch, 1+len(compBatches))
+	allBatches[c.packetsTable()] = nucleusBatch
+	maps.Copy(allBatches, compBatches)
+
+	type sendResult struct {
+		name string
+		err  error
 	}
-	for name, b := range compBatches {
-		if err := b.Send(); err != nil {
-			return fmt.Errorf("send %s: %w", name, err)
+	ch := make(chan sendResult, len(allBatches))
+	for name, b := range allBatches {
+		go func() { ch <- sendResult{name, b.Send()} }()
+	}
+	for range allBatches {
+		if r := <-ch; r.err != nil {
+			return fmt.Errorf("send %s: %w", r.name, r.err)
 		}
 	}
 	return nil

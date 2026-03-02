@@ -27,7 +27,6 @@ func (c *IPv6ExtComponent) Table() string         { return "pcap_ipv6_ext" }
 func (c *IPv6ExtComponent) Order() uint           { return OrderL3Ext }
 func (c *IPv6ExtComponent) Index() uint16         { return c.ExtIndex }
 func (c *IPv6ExtComponent) SetIndex(i uint16)     { c.ExtIndex = i }
-func (c *IPv6ExtComponent) FetchFINAL() bool      { return true }
 func (c *IPv6ExtComponent) FetchOrderBy() string  { return "packet_id, ext_index" }
 
 func (c *IPv6ExtComponent) HeaderLen() int {

@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -21,6 +20,7 @@ const (
 type Client struct {
 	conn clickhouse.Conn
 	cfg  Config // cfg.Database is always the resolved database name after New()
+	log  *slog.Logger
 
 	mu        sync.Mutex
 	batch     []CodecPacket
@@ -33,6 +33,11 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, errors.New("dsn is required")
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	opts, err := clickhouse.ParseDSN(cfg.DSN)
 	if err != nil {
 		opts = &clickhouse.Options{Addr: []string{cfg.DSN}}
@@ -41,8 +46,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Debug {
 		opts.Debug = true
 		if opts.Debugf == nil {
-			logger := log.New(os.Stderr, "caphouse: ", log.LstdFlags)
-			opts.Debugf = logger.Printf
+			opts.Debugf = func(format string, args ...any) {
+				logger.Debug(fmt.Sprintf(format, args...))
+			}
 		}
 	}
 
@@ -83,6 +89,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return &Client{
 		conn:      conn,
 		cfg:       cfg,
+		log:       logger,
 		lastFlush: time.Now(),
 	}, nil
 }

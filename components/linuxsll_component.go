@@ -29,7 +29,6 @@ func (c *LinuxSLLComponent) Order() uint          { return OrderL2Base }
 func (c *LinuxSLLComponent) Index() uint16        { return 0 }
 func (c *LinuxSLLComponent) SetIndex(_ uint16)    {}
 func (c *LinuxSLLComponent) HeaderLen() int       { return len(c.L2HdrRaw) }
-func (c *LinuxSLLComponent) FetchFINAL() bool     { return false }
 func (c *LinuxSLLComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *LinuxSLLComponent) ClickhouseColumns() ([]string, error) {

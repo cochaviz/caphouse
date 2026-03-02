@@ -1,3 +1,4 @@
 caphouse
 man/
 completions/
+*.pcap 

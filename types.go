@@ -1,6 +1,7 @@
 package caphouse
 
 import (
+	"log/slog"
 	"time"
 
 	"caphouse/components"
@@ -10,12 +11,13 @@ import (
 
 // Config controls the ClickHouse connection and ingest behavior.
 type Config struct {
-	DSN             string // clickhouse connection string or host:port
-	Database        string
-	SensorID        string
-	BatchSize int // packets per batch (ingest) and export window
-	FlushInterval   time.Duration
-	Debug           bool
+	DSN           string // clickhouse connection string or host:port
+	Database      string
+	SensorID      string
+	BatchSize     int // packets per batch (ingest) and export window
+	FlushInterval time.Duration
+	Debug         bool
+	Logger        *slog.Logger // nil uses slog.Default()
 }
 
 // CaptureMeta describes one stored capture's global metadata.

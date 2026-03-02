@@ -31,7 +31,6 @@ func (c *EthernetComponent) Order() uint       { return OrderL2Base }
 func (c *EthernetComponent) Index() uint16     { return 0 }
 func (c *EthernetComponent) SetIndex(_ uint16) {}
 func (c *EthernetComponent) HeaderLen() int    { return 14 }
-func (c *EthernetComponent) FetchFINAL() bool  { return false }
 func (c *EthernetComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *EthernetComponent) ClickhouseColumns() ([]string, error) {

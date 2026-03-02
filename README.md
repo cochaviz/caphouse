@@ -146,12 +146,10 @@ export. No packet is ever silently dropped.
 
 All tables use `ReplacingMergeTree`. Duplicates are removed during background
 merges, making it safe to re-ingest a file (e.g. after a failed run). On
-export, `FINAL` is applied to the packet stream and to the two multi-row
-component tables (Dot1Q, IPv6 extensions) to guarantee a clean result even
+export, `FINAL` is applied to all tables to guarantee a clean result even
 before background merges have caught up.
 
 ## Planned
 
-- Bulk export via JOIN rather than per-packet component fetches.
-- Wire up the `CreateBatch` abstraction from `components/utils.go` in `ingest.go` (currently unused).
+- Parallelize component table fetches in `fetchComponentsForBatch` (currently sequential; the 8 queries are independent).
 - Increase test coverage.

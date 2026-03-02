@@ -132,7 +132,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 	ctx := context.Background()
 	logger := newLogger(cfg.debug, cfg.silent)
 
-	client, err := newClient(ctx, cfg)
+	client, err := newClient(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	ctx := context.Background()
 	logger := newLogger(cfg.debug, cfg.silent)
 
-	client, err := newClient(ctx, cfg)
+	client, err := newClient(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,6 @@ func (c *RawTailComponent) Order() uint          { return OrderTail }
 func (c *RawTailComponent) Index() uint16        { return 0 }
 func (c *RawTailComponent) SetIndex(_ uint16)    {}
 func (c *RawTailComponent) HeaderLen() int       { return 0 }
-func (c *RawTailComponent) FetchFINAL() bool     { return false }
 func (c *RawTailComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *RawTailComponent) ClickhouseColumns() ([]string, error) {

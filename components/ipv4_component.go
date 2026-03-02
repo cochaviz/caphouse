@@ -49,7 +49,6 @@ func (c *IPv4Component) Order() uint          { return OrderL3Base }
 func (c *IPv4Component) Index() uint16        { return 0 }
 func (c *IPv4Component) SetIndex(_ uint16)    {}
 func (c *IPv4Component) HeaderLen() int       { return 20 }
-func (c *IPv4Component) FetchFINAL() bool     { return false }
 func (c *IPv4Component) FetchOrderBy() string { return "packet_id" }
 
 func (c *IPv4Component) ClickhouseColumns() ([]string, error) {

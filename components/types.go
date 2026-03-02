@@ -182,7 +182,6 @@ type ComponentFetcher interface {
 	ClickhouseMappedDecoder
 	ScanColumns() []string
 	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
-	FetchFINAL() bool
 	FetchOrderBy() string
 }
 

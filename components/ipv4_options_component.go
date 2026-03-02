@@ -26,7 +26,6 @@ func (c *IPv4OptionsComponent) Order() uint          { return OrderL3Options }
 func (c *IPv4OptionsComponent) Index() uint16        { return 0 }
 func (c *IPv4OptionsComponent) SetIndex(_ uint16)    {}
 func (c *IPv4OptionsComponent) HeaderLen() int       { return len(c.OptionsRaw) }
-func (c *IPv4OptionsComponent) FetchFINAL() bool     { return false }
 func (c *IPv4OptionsComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *IPv4OptionsComponent) ClickhouseColumns() ([]string, error) {
