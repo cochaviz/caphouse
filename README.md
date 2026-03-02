@@ -60,6 +60,7 @@ The schema is created automatically on the first read-mode invocation.
 | `--batch-size` | — | 1000 | Number of packets per ClickHouse batch insert. |
 | `--flush-interval` | — | 1s | Maximum time between batch flushes. |
 | `--debug` | — | false | Enable verbose ClickHouse driver logging to stderr. |
+| `--silent` | `-s` | false | Suppress warnings and progress output. |
 
 ### Examples
 
@@ -149,7 +150,17 @@ merges, making it safe to re-ingest a file (e.g. after a failed run). On
 export, `FINAL` is applied to all tables to guarantee a clean result even
 before background merges have caught up.
 
-## Planned
+## Testing
 
-- Parallelize component table fetches in `fetchComponentsForBatch` (currently sequential; the 8 queries are independent).
-- Increase test coverage.
+```sh
+# Unit tests
+go test ./...
+
+# Integration tests — require Docker (spins up a ClickHouse container)
+go test -tags integration -timeout 300s ./...
+
+# Compression ratio report — require Docker
+go test -tags compression -v -timeout 120s .
+```
+
+CI runs unit and integration tests automatically on every push and pull request via GitHub Actions.
