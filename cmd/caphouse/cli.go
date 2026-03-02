@@ -1,12 +1,14 @@
 package main
 
 import (
+	_ "embed"
 	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
@@ -18,6 +20,22 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
+
+//go:embed description.txt
+var longDescription string
+
+// config holds all resolved flag/env values for a single invocation.
+type config struct {
+	dsn           string
+	database      string
+	batchSize     int
+	flushInterval time.Duration
+	filePath      string
+	capture       string
+	sensor        string
+	debug         bool
+	silent        bool
+}
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -36,121 +54,35 @@ func rootCmd() *cobra.Command {
 	var capture string
 	var sensor string
 	var debug bool
+	var silent bool
 
 	cmd := &cobra.Command{
-		Use:   "caphouse",
-		Short: "Store and export classic PCAPs in ClickHouse",
-		Long: `caphouse stores and exports classic PCAP files in ClickHouse.
-
-Instead of writing raw frames to disk, it parses each packet into its protocol
-layers and stores each layer in its own ClickHouse table. This makes packet data
-queryable at the column level while still allowing lossless PCAP reconstruction.
-
-Modes:
-  -r (default)  Read a PCAP file or stream and ingest it into ClickHouse.
-  -w         	Export a stored capture back as a PCAP file or stream.
-
-The DSN must use the native ClickHouse protocol (clickhouse://host:9000/db).
-HTTP connections are not supported.`,
-		Example: `  # Ingest a file (new capture; UUID printed on completion)
-  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost --file=capture.pcap
-
-  # Append packets to an existing capture
-  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost --file=more.pcap --capture=<uuid>
-
-  # Pipe from tcpdump
-  tcpdump -i eth0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost
-
-  # Export to a file
-  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> --file=out.pcap
-
-  # Stream into tcpreplay
-  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> | tcpreplay --intf1=eth0 -`,
+		Use:          "caphouse",
+		Short:        "Store and export classic PCAPs in ClickHouse",
+		Long:         longDescription,
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if readMode && writeMode {
 				return errors.New("--read and --write are mutually exclusive")
 			}
-			mode := "read"
-			if writeMode {
-				mode = "write"
+			cfg := config{
+				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
+				database:      firstNonEmpty(database, os.Getenv("CAPHOUSE_DB"), os.Getenv("CAPHOUSE_DATABASE")),
+				sensor:        firstNonEmpty(sensor, os.Getenv("CAPHOUSE_SENSOR")),
+				filePath:      filePath,
+				capture:       capture,
+				batchSize:     batchSize,
+				flushInterval: flushInterval,
+				debug:         debug,
+				silent:        silent,
 			}
-
-			effectiveDSN := firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN"))
-			if effectiveDSN == "" {
+			if cfg.dsn == "" {
 				return errors.New("dsn is required (flag --dsn or env CAPHOUSE_DSN)")
 			}
-			effectiveDB := firstNonEmpty(database, os.Getenv("CAPHOUSE_DB"), os.Getenv("CAPHOUSE_DATABASE"))
-			effectiveSensor := firstNonEmpty(sensor, os.Getenv("CAPHOUSE_SENSOR"))
-
-			client, err := newClient(ctx, effectiveDSN, effectiveDB, batchSize, flushInterval, debug)
-			if err != nil {
-				return err
+			if writeMode {
+				return runWrite(cmd, cfg)
 			}
-			defer client.Close()
-
-			switch mode {
-			case "read":
-				if effectiveSensor == "" {
-					return errors.New("sensor is required (flag --sensor or env CAPHOUSE_SENSOR)")
-				}
-				if err := client.InitSchema(ctx); err != nil {
-					return err
-				}
-
-				captureID, isNew, err := parseCaptureID(capture, true)
-				if err != nil {
-					return err
-				}
-
-				src := io.Reader(os.Stdin)
-				if filePath != "" && filePath != "-" {
-					f, err := os.Open(filePath)
-					if err != nil {
-						return fmt.Errorf("open pcap: %w", err)
-					}
-					defer f.Close()
-					src = f
-				}
-
-				id, err := ingestPCAPStream(ctx, client, src, captureID, effectiveSensor)
-				if err != nil {
-					return err
-				}
-				if isNew {
-					fmt.Fprintf(cmd.OutOrStdout(), "capture_id=%s\n", id)
-				}
-				return nil
-
-			case "write":
-				captureID, _, err := parseCaptureID(capture, false)
-				if err != nil {
-					return err
-				}
-
-				rc, err := client.ExportCapture(ctx, captureID)
-				if err != nil {
-					return err
-				}
-				defer rc.Close()
-
-				out := io.Writer(cmd.OutOrStdout())
-				if filePath != "" && filePath != "-" {
-					f, err := os.Create(filePath)
-					if err != nil {
-						return fmt.Errorf("create output: %w", err)
-					}
-					defer f.Close()
-					out = f
-				}
-
-				_, err = io.Copy(out, rc)
-				return err
-			default:
-				return fmt.Errorf("unknown mode %q", mode)
-			}
+			return runRead(cmd, cfg)
 		},
 	}
 
@@ -159,6 +91,7 @@ HTTP connections are not supported.`,
 	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "packets per ClickHouse batch insert")
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "maximum time between batch flushes")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging to stderr")
+	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "suppress warnings and progress output")
 
 	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "ingest PCAP from file or stdin into ClickHouse (default mode)")
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
@@ -191,7 +124,143 @@ HTTP connections are not supported.`,
 	return cmd
 }
 
-func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string) (uuid.UUID, error) {
+func runRead(cmd *cobra.Command, cfg config) error {
+	if cfg.sensor == "" {
+		return errors.New("sensor is required (flag --sensor or env CAPHOUSE_SENSOR)")
+	}
+
+	ctx := context.Background()
+	logger := newLogger(cfg.debug, cfg.silent)
+
+	client, err := newClient(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if err := client.InitSchema(ctx); err != nil {
+		return err
+	}
+
+	captureID, isNew, err := parseCaptureID(cfg.capture, true)
+	if err != nil {
+		return err
+	}
+
+	src, fileSize, captureID, err := openSource(cfg.filePath, captureID, isNew, logger)
+	if err != nil {
+		return err
+	}
+	if closer, ok := src.(io.Closer); ok {
+		defer closer.Close()
+	}
+
+	var p ingestProgress
+	cr := &countingReader{r: src, p: &p}
+
+	srcLabel := cfg.filePath
+	if srcLabel == "" || srcLabel == "-" {
+		srcLabel = "stdin"
+	}
+	logger.Info("ingesting", "source", srcLabel, "sensor", cfg.sensor)
+
+	start := time.Now()
+	stopBar := startProgressBar(fileSize, &p, start, cfg.silent)
+
+	id, err := ingestPCAPStream(ctx, client, cr, captureID, cfg.sensor, &p)
+	stopBar()
+
+	if err != nil {
+		return err
+	}
+
+	logger.Info("done",
+		"capture_id", id,
+		"packets", p.packets.Load(),
+		"bytes", p.bytesRead.Load(),
+		"elapsed", time.Since(start).Truncate(time.Millisecond),
+	)
+
+	if isNew {
+		fmt.Fprintf(cmd.OutOrStdout(), "capture_id=%s\n", id)
+	}
+	return nil
+}
+
+func runWrite(cmd *cobra.Command, cfg config) error {
+	captureID, _, err := parseCaptureID(cfg.capture, false)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	client, err := newClient(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	rc, err := client.ExportCapture(ctx, captureID)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	out := io.Writer(cmd.OutOrStdout())
+	if cfg.filePath != "" && cfg.filePath != "-" {
+		f, err := os.Create(cfg.filePath)
+		if err != nil {
+			return fmt.Errorf("create output: %w", err)
+		}
+		defer f.Close()
+		out = f
+	}
+
+	_, err = io.Copy(out, rc)
+	return err
+}
+
+// openSource opens the PCAP source (file or stdin). For files with an
+// auto-generated capture ID it also derives a stable content-addressed ID and
+// seeks the file back to the start. Returns the reader, file size (-1 for
+// stdin), and the (possibly updated) capture ID.
+func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.Logger) (io.Reader, int64, uuid.UUID, error) {
+	if filePath == "" || filePath == "-" {
+		return os.Stdin, -1, captureID, nil
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, 0, uuid.Nil, fmt.Errorf("open pcap: %w", err)
+	}
+
+	var fileSize int64 = -1
+	if fi, err := f.Stat(); err == nil {
+		fileSize = fi.Size()
+	}
+
+	if isNew {
+		// Derive a stable, content-addressed capture ID from the file name and
+		// contents so that re-ingesting the same file produces the same UUID
+		// and ClickHouse deduplication works.
+		stableID, err := stableCaptureID(filePath, f)
+		if err != nil {
+			f.Close()
+			return nil, 0, uuid.Nil, err
+		}
+		captureID = stableID
+		logger.Debug("stable capture_id derived", "source", filePath, "capture_id", captureID)
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			f.Close()
+			return nil, 0, uuid.Nil, fmt.Errorf("seek pcap: %w", err)
+		}
+	}
+
+	return f, fileSize, captureID, nil
+}
+
+func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress) (uuid.UUID, error) {
 	br := bufio.NewReader(r)
 	header := make([]byte, 24)
 	if _, err := io.ReadFull(br, header); err != nil {
@@ -241,6 +310,7 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 			return uuid.Nil, err
 		}
 		packetID++
+		p.packets.Add(1)
 	}
 
 	if err := client.Flush(ctx); err != nil {
@@ -248,41 +318,4 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 	}
 
 	return capID, nil
-}
-
-func newClient(ctx context.Context, dsn, database string, batchSize int, flushInterval time.Duration, debug bool) (*caphouse.Client, error) {
-	if dsn == "" {
-		return nil, errors.New("dsn is required")
-	}
-	cfg := caphouse.Config{
-		DSN:           dsn,
-		Database:      database,
-		BatchSize:     batchSize,
-		FlushInterval: flushInterval,
-		Debug:         debug,
-	}
-	return caphouse.New(ctx, cfg)
-}
-
-func parseCaptureID(input string, allowNew bool) (uuid.UUID, bool, error) {
-	if input == "" || input == "new" {
-		if !allowNew {
-			return uuid.Nil, false, errors.New("capture id is required")
-		}
-		return uuid.New(), true, nil
-	}
-	id, err := uuid.Parse(input)
-	if err != nil {
-		return uuid.Nil, false, fmt.Errorf("invalid capture id: %w", err)
-	}
-	return id, false, nil
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
