@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"caphouse/components"
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,6 +12,8 @@ import (
 	"math/big"
 	"net/netip"
 	"os"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,8 +27,38 @@ type captureMetaRow struct {
 	GlobalHeaderRaw []byte
 }
 
+// captureComponents holds component rows for a batch of packets, keyed by packet_id.
+type captureComponents struct {
+	ethernet    map[uint64]*components.EthernetComponent
+	dot1q       map[uint64][]*components.Dot1QComponent
+	linuxSLL    map[uint64]*components.LinuxSLLComponent
+	ipv4        map[uint64]*components.IPv4Component
+	ipv4Options map[uint64]*components.IPv4OptionsComponent
+	ipv6        map[uint64]*components.IPv6Component
+	ipv6Ext     map[uint64][]*components.IPv6ExtComponent
+	rawTail     map[uint64]*components.RawTailComponent
+}
+
+// CountPackets returns the number of packets stored for the given capture.
+// The count is an estimate (no FINAL deduplication) and is suitable for
+// driving a progress bar.
+func (c *Client) CountPackets(ctx context.Context, captureID uuid.UUID) (int64, error) {
+	query := fmt.Sprintf("SELECT count() FROM %s WHERE capture_id = ?", c.packetsTable())
+	var n uint64
+	if err := c.conn.QueryRow(ctx, query, captureID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count packets: %w", err)
+	}
+	return int64(n), nil
+}
+
 // ExportCapture returns a reader that streams a classic PCAP file.
 func (c *Client) ExportCapture(ctx context.Context, captureID uuid.UUID) (io.ReadCloser, error) {
+	return c.ExportCaptureWithProgress(ctx, captureID, nil)
+}
+
+// ExportCaptureWithProgress is like ExportCapture but increments packetsWritten
+// after each packet is written to the stream. packetsWritten may be nil.
+func (c *Client) ExportCaptureWithProgress(ctx context.Context, captureID uuid.UUID, packetsWritten *atomic.Int64) (io.ReadCloser, error) {
 	meta, err := c.fetchCaptureMeta(ctx, captureID)
 	if err != nil {
 		return nil, err
@@ -35,7 +66,7 @@ func (c *Client) ExportCapture(ctx context.Context, captureID uuid.UUID) (io.Rea
 
 	pr, pw := io.Pipe()
 	go func() {
-		if err := c.streamCapture(ctx, meta, captureID, pw); err != nil {
+		if err := c.streamCapture(ctx, meta, captureID, pw, packetsWritten); err != nil {
 			_ = pw.CloseWithError(err)
 			return
 		}
@@ -73,7 +104,7 @@ func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (cap
 	return meta, nil
 }
 
-func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, w io.Writer) error {
+func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
 	buf := bufio.NewWriterSize(w, 128*1024)
 	if err := writePCAPHeader(buf, meta); err != nil {
 		return err
@@ -86,104 +117,88 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 	}
 	defer rows.Close()
 
+	type nucleusRow struct {
+		packetID      uint64
+		ts            time.Time
+		incl, orig    uint32
+		componentMask *big.Int
+		tailOffset    uint16
+		frameRaw      string
+		frameHash     string
+	}
+
 	order := byteOrder(meta.Endianness)
+	batchSize := c.cfg.BatchSize
+	batch := make([]nucleusRow, 0, batchSize)
+
+	flushBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		packetIDs := make([]uint64, len(batch))
+		for i, row := range batch {
+			packetIDs[i] = row.packetID
+		}
+
+		comps, err := c.fetchComponentsForBatch(ctx, captureID, packetIDs)
+		if err != nil {
+			return err
+		}
+
+		for _, row := range batch {
+			nucleus := components.PacketNucleus{
+				CaptureID:  captureID,
+				PacketID:   row.packetID,
+				Timestamp:  row.ts,
+				InclLen:    row.incl,
+				OrigLen:    row.orig,
+				Components: row.componentMask,
+				TailOffset: row.tailOffset,
+				FrameRaw:   []byte(row.frameRaw),
+				FrameHash:  []byte(row.frameHash),
+			}
+			componentList, err := resolveComponents(nucleus, comps)
+			if err != nil {
+				return err
+			}
+			frame, err := ReconstructFrame(nucleus, componentList)
+			if err != nil {
+				if c.cfg.Debug {
+					debugPacketDump(captureID, row.packetID, nucleus, componentList)
+				}
+				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
+			}
+			if err := writePacketRecord(buf, order, row.ts, row.incl, row.orig, frame); err != nil {
+				return err
+			}
+			if packetsWritten != nil {
+				packetsWritten.Add(1)
+			}
+		}
+
+		batch = batch[:0]
+		return nil
+	}
+
 	for rows.Next() {
-		var packetID uint64
-		var ts time.Time
-		var incl uint32
-		var orig uint32
-		var componentMask big.Int
-		var tailOffset uint16
-		var frameRaw string
-		var frameHash string
-		if err := rows.Scan(&packetID, &ts, &incl, &orig, &componentMask, &tailOffset, &frameRaw, &frameHash); err != nil {
+		componentMask := new(big.Int)
+		var row nucleusRow
+		row.componentMask = componentMask
+		if err := rows.Scan(&row.packetID, &row.ts, &row.incl, &row.orig, componentMask, &row.tailOffset, &row.frameRaw, &row.frameHash); err != nil {
 			return fmt.Errorf("scan packet: %w", err)
 		}
-
-		nucleus := components.PacketNucleus{
-			CaptureID:  captureID,
-			PacketID:   packetID,
-			Timestamp:  ts,
-			InclLen:    incl,
-			OrigLen:    orig,
-			Components: new(big.Int).Set(&componentMask),
-			TailOffset: tailOffset,
-			FrameRaw:   []byte(frameRaw),
-			FrameHash:  []byte(frameHash),
-		}
-
-		componentList := []components.ClickhouseMappedDecoder{}
-
-		if components.ComponentHas(nucleus.Components, components.ComponentEthernet) {
-			ethernet, err := c.fetchEthernet(ctx, captureID, packetID)
-			if err != nil {
+		batch = append(batch, row)
+		if len(batch) >= batchSize {
+			if err := flushBatch(); err != nil {
 				return err
 			}
-			componentList = append(componentList, ethernet)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentDot1Q) {
-			tags, err := c.fetchDot1Q(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, tags...)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentLinuxSLL) {
-			sll, err := c.fetchLinuxSLL(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, sll)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentIPv4) {
-			ipv4, err := c.fetchIPv4(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, ipv4)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentIPv4Options) {
-			options, err := c.fetchIPv4Options(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, options)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentIPv6) {
-			ipv6, err := c.fetchIPv6(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, ipv6)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentIPv6Ext) {
-			exts, err := c.fetchIPv6Ext(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, exts...)
-		}
-		if components.ComponentHas(nucleus.Components, components.ComponentRawTail) {
-			tail, err := c.fetchRawTail(ctx, captureID, packetID)
-			if err != nil {
-				return err
-			}
-			componentList = append(componentList, tail)
-		}
-
-		frame, err := ReconstructFrame(nucleus, componentList)
-		if err != nil {
-			if c.cfg.Debug {
-				debugPacketDump(captureID, packetID, nucleus, componentList)
-			}
-			return fmt.Errorf("reconstruct packet %d: %w", packetID, err)
-		}
-		if err := writePacketRecord(buf, order, ts, incl, orig, frame); err != nil {
-			return err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate packets: %w", err)
+	}
+	if err := flushBatch(); err != nil {
+		return err
 	}
 	if err := buf.Flush(); err != nil {
 		return fmt.Errorf("flush pcap stream: %w", err)
@@ -191,47 +206,174 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 	return nil
 }
 
-func (c *Client) fetchEthernet(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.EthernetComponent, error) {
-	query := fmt.Sprintf("SELECT src_mac, dst_mac, eth_type, eth_len FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1", c.ethernetTable())
-	var src string
-	var dst string
-	var ethType uint16
-	var ethLen uint16
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(&src, &dst, &ethType, &ethLen); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+// resolveComponents builds the component list for one packet from a pre-fetched batch map.
+func resolveComponents(nucleus components.PacketNucleus, comps captureComponents) ([]components.ClickhouseMappedDecoder, error) {
+	captureID := nucleus.CaptureID
+	packetID := nucleus.PacketID
+	var list []components.ClickhouseMappedDecoder
+
+	if components.ComponentHas(nucleus.Components, components.ComponentEthernet) {
+		eth, ok := comps.ethernet[packetID]
+		if !ok {
 			return nil, fmt.Errorf("missing ethernet component for %s/%d", captureID, packetID)
 		}
-		return nil, fmt.Errorf("fetch ethernet: %w", err)
+		list = append(list, eth)
 	}
-	return &components.EthernetComponent{
-		CaptureID: captureID,
-		PacketID:  packetID,
-		SrcMAC:    []byte(src),
-		DstMAC:    []byte(dst),
-		EtherType: ethType,
-		Length:    ethLen,
-	}, nil
+	if components.ComponentHas(nucleus.Components, components.ComponentDot1Q) {
+		tags, ok := comps.dot1q[packetID]
+		if !ok || len(tags) == 0 {
+			return nil, fmt.Errorf("missing dot1q component for %s/%d", captureID, packetID)
+		}
+		for _, tag := range tags {
+			list = append(list, tag)
+		}
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentLinuxSLL) {
+		sll, ok := comps.linuxSLL[packetID]
+		if !ok {
+			return nil, fmt.Errorf("missing linux sll component for %s/%d", captureID, packetID)
+		}
+		list = append(list, sll)
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentIPv4) {
+		ipv4, ok := comps.ipv4[packetID]
+		if !ok {
+			return nil, fmt.Errorf("missing ipv4 component for %s/%d", captureID, packetID)
+		}
+		list = append(list, ipv4)
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentIPv4Options) {
+		options, ok := comps.ipv4Options[packetID]
+		if !ok {
+			return nil, fmt.Errorf("missing ipv4 options component for %s/%d", captureID, packetID)
+		}
+		list = append(list, options)
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentIPv6) {
+		ipv6, ok := comps.ipv6[packetID]
+		if !ok {
+			return nil, fmt.Errorf("missing ipv6 component for %s/%d", captureID, packetID)
+		}
+		list = append(list, ipv6)
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentIPv6Ext) {
+		exts, ok := comps.ipv6Ext[packetID]
+		if !ok || len(exts) == 0 {
+			return nil, fmt.Errorf("missing ipv6 ext component for %s/%d", captureID, packetID)
+		}
+		for _, ext := range exts {
+			list = append(list, ext)
+		}
+	}
+	if components.ComponentHas(nucleus.Components, components.ComponentRawTail) {
+		tail, ok := comps.rawTail[packetID]
+		if !ok {
+			return nil, fmt.Errorf("missing raw tail for %s/%d", captureID, packetID)
+		}
+		list = append(list, tail)
+	}
+	return list, nil
 }
 
-func (c *Client) fetchDot1Q(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]components.ClickhouseMappedDecoder, error) {
-	query := fmt.Sprintf("SELECT tag_index, priority, drop_eligible, vlan_id, eth_type FROM %s FINAL WHERE capture_id = ? AND packet_id = ? ORDER BY tag_index ASC", c.dot1qTable())
-	rows, err := c.conn.Query(ctx, query, captureID, packetID)
+// batchArgs returns the IN-clause placeholder and args slice for a batch query.
+// args[0] is captureID; args[1:] are the packet IDs.
+func batchArgs(captureID uuid.UUID, packetIDs []uint64) (string, []any) {
+	var b strings.Builder
+	b.WriteByte('(')
+	for i := range packetIDs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+	}
+	b.WriteByte(')')
+	args := make([]any, 1+len(packetIDs))
+	args[0] = captureID
+	for i, pid := range packetIDs {
+		args[i+1] = pid
+	}
+	return b.String(), args
+}
+
+func (c *Client) fetchComponentsForBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (captureComponents, error) {
+	var cc captureComponents
+	var err error
+
+	if cc.ethernet, err = c.fetchEthernetBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.dot1q, err = c.fetchDot1QBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.linuxSLL, err = c.fetchLinuxSLLBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.ipv4, err = c.fetchIPv4Batch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.ipv4Options, err = c.fetchIPv4OptionsBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.ipv6, err = c.fetchIPv6Batch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.ipv6Ext, err = c.fetchIPv6ExtBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	if cc.rawTail, err = c.fetchRawTailBatch(ctx, captureID, packetIDs); err != nil {
+		return captureComponents{}, err
+	}
+	return cc, nil
+}
+
+func (c *Client) fetchEthernetBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.EthernetComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, src_mac, dst_mac, eth_type, eth_len FROM %s WHERE capture_id = ? AND packet_id IN %s", c.ethernetTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ethernet: %w", err)
+	}
+	defer rows.Close()
+
+	m := make(map[uint64]*components.EthernetComponent)
+	for rows.Next() {
+		var packetID uint64
+		var src, dst string
+		var ethType, ethLen uint16
+		if err := rows.Scan(&packetID, &src, &dst, &ethType, &ethLen); err != nil {
+			return nil, fmt.Errorf("scan ethernet: %w", err)
+		}
+		m[packetID] = &components.EthernetComponent{
+			CaptureID: captureID,
+			PacketID:  packetID,
+			SrcMAC:    []byte(src),
+			DstMAC:    []byte(dst),
+			EtherType: ethType,
+			Length:    ethLen,
+		}
+	}
+	return m, rows.Err()
+}
+
+func (c *Client) fetchDot1QBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64][]*components.Dot1QComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, tag_index, priority, drop_eligible, vlan_id, eth_type FROM %s FINAL WHERE capture_id = ? AND packet_id IN %s ORDER BY packet_id, tag_index ASC", c.dot1qTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fetch dot1q: %w", err)
 	}
 	defer rows.Close()
 
-	var componentsList []components.ClickhouseMappedDecoder
+	m := make(map[uint64][]*components.Dot1QComponent)
 	for rows.Next() {
+		var packetID uint64
 		var index uint16
-		var priority uint8
-		var dropEligible uint8
-		var vlanID uint16
-		var ethType uint16
-		if err := rows.Scan(&index, &priority, &dropEligible, &vlanID, &ethType); err != nil {
+		var priority, dropEligible uint8
+		var vlanID, ethType uint16
+		if err := rows.Scan(&packetID, &index, &priority, &dropEligible, &vlanID, &ethType); err != nil {
 			return nil, fmt.Errorf("scan dot1q: %w", err)
 		}
-		componentsList = append(componentsList, &components.Dot1QComponent{
+		m[packetID] = append(m[packetID], &components.Dot1QComponent{
 			CaptureID:    captureID,
 			PacketID:     packetID,
 			TagIndex:     index,
@@ -241,172 +383,171 @@ func (c *Client) fetchDot1Q(ctx context.Context, captureID uuid.UUID, packetID u
 			DropEligible: dropEligible,
 		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate dot1q: %w", err)
-	}
-	if len(componentsList) == 0 {
-		return nil, fmt.Errorf("missing dot1q component for %s/%d", captureID, packetID)
-	}
-	return componentsList, nil
+	return m, rows.Err()
 }
 
-func (c *Client) fetchLinuxSLL(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.LinuxSLLComponent, error) {
-	query := fmt.Sprintf("SELECT l2_len, l2_hdr_raw FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1", c.linuxSLLTable())
-	var l2Len uint16
-	var raw string
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(&l2Len, &raw); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("missing linux sll component for %s/%d", captureID, packetID)
-		}
+func (c *Client) fetchLinuxSLLBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.LinuxSLLComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, l2_len, l2_hdr_raw FROM %s WHERE capture_id = ? AND packet_id IN %s", c.linuxSLLTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("fetch linux sll: %w", err)
 	}
-	return &components.LinuxSLLComponent{
-		CaptureID: captureID,
-		PacketID:  packetID,
-		L2Len:     l2Len,
-		L2HdrRaw:  []byte(raw),
-	}, nil
+	defer rows.Close()
+
+	m := make(map[uint64]*components.LinuxSLLComponent)
+	for rows.Next() {
+		var packetID uint64
+		var l2Len uint16
+		var raw string
+		if err := rows.Scan(&packetID, &l2Len, &raw); err != nil {
+			return nil, fmt.Errorf("scan linux sll: %w", err)
+		}
+		m[packetID] = &components.LinuxSLLComponent{
+			CaptureID: captureID,
+			PacketID:  packetID,
+			L2Len:     l2Len,
+			L2HdrRaw:  []byte(raw),
+		}
+	}
+	return m, rows.Err()
 }
 
-func (c *Client) fetchIPv4(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.IPv4Component, error) {
-	query := fmt.Sprintf(`SELECT ts, parsed_ok, parse_err, protocol, src_ip_v4, dst_ip_v4,
+func (c *Client) fetchIPv4Batch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.IPv4Component, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf(`SELECT packet_id, ts, parsed_ok, parse_err, protocol, src_ip_v4, dst_ip_v4,
   ipv4_ihl, ipv4_tos, ipv4_total_len, ipv4_id, ipv4_flags, ipv4_frag_offset, ipv4_ttl, ipv4_hdr_checksum
-FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1`, c.ipv4Table())
-	var ts time.Time
-	var parsedOK uint8
-	var parseErr string
-	var protocol uint8
-	var src4 string
-	var dst4 string
-	var ipv4IHL uint8
-	var ipv4TOS uint8
-	var ipv4TotalLen uint16
-	var ipv4ID uint16
-	var ipv4Flags uint8
-	var ipv4Frag uint16
-	var ipv4TTL uint8
-	var ipv4Checksum uint16
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(
-		&ts,
-		&parsedOK,
-		&parseErr,
-		&protocol,
-		&src4,
-		&dst4,
-		&ipv4IHL,
-		&ipv4TOS,
-		&ipv4TotalLen,
-		&ipv4ID,
-		&ipv4Flags,
-		&ipv4Frag,
-		&ipv4TTL,
-		&ipv4Checksum,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("missing ipv4 component for %s/%d", captureID, packetID)
-		}
+FROM %s WHERE capture_id = ? AND packet_id IN %s`, c.ipv4Table(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("fetch ipv4: %w", err)
 	}
-	return &components.IPv4Component{
-		CaptureID:       captureID,
-		PacketID:        packetID,
-		Timestamp:       ts,
-		ParsedOK:        parsedOK,
-		ParseErr:        parseErr,
-		Protocol:        protocol,
-		SrcIP4:          parseAddr(src4),
-		DstIP4:          parseAddr(dst4),
-		IPv4IHL:         ipv4IHL,
-		IPv4TOS:         ipv4TOS,
-		IPv4TotalLen:    ipv4TotalLen,
-		IPv4ID:          ipv4ID,
-		IPv4Flags:       ipv4Flags,
-		IPv4FragOffset:  ipv4Frag,
-		IPv4TTL:         ipv4TTL,
-		IPv4HdrChecksum: ipv4Checksum,
-	}, nil
+	defer rows.Close()
+
+	m := make(map[uint64]*components.IPv4Component)
+	for rows.Next() {
+		var packetID uint64
+		var ts time.Time
+		var parsedOK uint8
+		var parseErr string
+		var protocol uint8
+		var src4, dst4 string
+		var ihl, tos, ttl uint8
+		var totalLen, id, frag, checksum uint16
+		var flags uint8
+		if err := rows.Scan(&packetID, &ts, &parsedOK, &parseErr, &protocol, &src4, &dst4,
+			&ihl, &tos, &totalLen, &id, &flags, &frag, &ttl, &checksum); err != nil {
+			return nil, fmt.Errorf("scan ipv4: %w", err)
+		}
+		m[packetID] = &components.IPv4Component{
+			CaptureID:       captureID,
+			PacketID:        packetID,
+			Timestamp:       ts,
+			ParsedOK:        parsedOK,
+			ParseErr:        parseErr,
+			Protocol:        protocol,
+			SrcIP4:          parseAddr(src4),
+			DstIP4:          parseAddr(dst4),
+			IPv4IHL:         ihl,
+			IPv4TOS:         tos,
+			IPv4TotalLen:    totalLen,
+			IPv4ID:          id,
+			IPv4Flags:       flags,
+			IPv4FragOffset:  frag,
+			IPv4TTL:         ttl,
+			IPv4HdrChecksum: checksum,
+		}
+	}
+	return m, rows.Err()
 }
 
-func (c *Client) fetchIPv4Options(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.IPv4OptionsComponent, error) {
-	query := fmt.Sprintf("SELECT options_raw FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1", c.ipv4OptionsTable())
-	var raw string
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(&raw); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("missing ipv4 options component for %s/%d", captureID, packetID)
-		}
+func (c *Client) fetchIPv4OptionsBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.IPv4OptionsComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, options_raw FROM %s WHERE capture_id = ? AND packet_id IN %s", c.ipv4OptionsTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("fetch ipv4 options: %w", err)
 	}
-	return &components.IPv4OptionsComponent{
-		CaptureID:  captureID,
-		PacketID:   packetID,
-		OptionsRaw: []byte(raw),
-	}, nil
+	defer rows.Close()
+
+	m := make(map[uint64]*components.IPv4OptionsComponent)
+	for rows.Next() {
+		var packetID uint64
+		var raw string
+		if err := rows.Scan(&packetID, &raw); err != nil {
+			return nil, fmt.Errorf("scan ipv4 options: %w", err)
+		}
+		m[packetID] = &components.IPv4OptionsComponent{
+			CaptureID:  captureID,
+			PacketID:   packetID,
+			OptionsRaw: []byte(raw),
+		}
+	}
+	return m, rows.Err()
 }
 
-func (c *Client) fetchIPv6(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.IPv6Component, error) {
-	query := fmt.Sprintf(`SELECT ts, parsed_ok, parse_err, protocol, src_ip_v6, dst_ip_v6,
+func (c *Client) fetchIPv6Batch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.IPv6Component, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf(`SELECT packet_id, ts, parsed_ok, parse_err, protocol, src_ip_v6, dst_ip_v6,
   ipv6_payload_len, ipv6_hop_limit, ipv6_flow_label, ipv6_traffic_class
-FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1`, c.ipv6Table())
-	var ts time.Time
-	var parsedOK uint8
-	var parseErr string
-	var protocol uint8
-	var src6 string
-	var dst6 string
-	var ipv6PayloadLen uint16
-	var ipv6HopLimit uint8
-	var ipv6FlowLabel uint32
-	var ipv6TrafficClass uint8
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(
-		&ts,
-		&parsedOK,
-		&parseErr,
-		&protocol,
-		&src6,
-		&dst6,
-		&ipv6PayloadLen,
-		&ipv6HopLimit,
-		&ipv6FlowLabel,
-		&ipv6TrafficClass,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("missing ipv6 component for %s/%d", captureID, packetID)
-		}
+FROM %s WHERE capture_id = ? AND packet_id IN %s`, c.ipv6Table(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("fetch ipv6: %w", err)
 	}
-	return &components.IPv6Component{
-		CaptureID:        captureID,
-		PacketID:         packetID,
-		Timestamp:        ts,
-		ParsedOK:         parsedOK,
-		ParseErr:         parseErr,
-		Protocol:         protocol,
-		SrcIP6:           parseAddr(src6),
-		DstIP6:           parseAddr(dst6),
-		IPv6PayloadLen:   ipv6PayloadLen,
-		IPv6HopLimit:     ipv6HopLimit,
-		IPv6FlowLabel:    ipv6FlowLabel,
-		IPv6TrafficClass: ipv6TrafficClass,
-	}, nil
+	defer rows.Close()
+
+	m := make(map[uint64]*components.IPv6Component)
+	for rows.Next() {
+		var packetID uint64
+		var ts time.Time
+		var parsedOK uint8
+		var parseErr string
+		var protocol uint8
+		var src6, dst6 string
+		var payloadLen uint16
+		var hopLimit, trafficClass uint8
+		var flowLabel uint32
+		if err := rows.Scan(&packetID, &ts, &parsedOK, &parseErr, &protocol, &src6, &dst6,
+			&payloadLen, &hopLimit, &flowLabel, &trafficClass); err != nil {
+			return nil, fmt.Errorf("scan ipv6: %w", err)
+		}
+		m[packetID] = &components.IPv6Component{
+			CaptureID:        captureID,
+			PacketID:         packetID,
+			Timestamp:        ts,
+			ParsedOK:         parsedOK,
+			ParseErr:         parseErr,
+			Protocol:         protocol,
+			SrcIP6:           parseAddr(src6),
+			DstIP6:           parseAddr(dst6),
+			IPv6PayloadLen:   payloadLen,
+			IPv6HopLimit:     hopLimit,
+			IPv6FlowLabel:    flowLabel,
+			IPv6TrafficClass: trafficClass,
+		}
+	}
+	return m, rows.Err()
 }
 
-func (c *Client) fetchIPv6Ext(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]components.ClickhouseMappedDecoder, error) {
-	query := fmt.Sprintf("SELECT ext_index, ext_type, ext_raw FROM %s FINAL WHERE capture_id = ? AND packet_id = ? ORDER BY ext_index ASC", c.ipv6ExtTable())
-	rows, err := c.conn.Query(ctx, query, captureID, packetID)
+func (c *Client) fetchIPv6ExtBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64][]*components.IPv6ExtComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, ext_index, ext_type, ext_raw FROM %s FINAL WHERE capture_id = ? AND packet_id IN %s ORDER BY packet_id, ext_index ASC", c.ipv6ExtTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fetch ipv6 ext: %w", err)
 	}
 	defer rows.Close()
 
-	var componentsList []components.ClickhouseMappedDecoder
+	m := make(map[uint64][]*components.IPv6ExtComponent)
 	for rows.Next() {
-		var index uint16
-		var extType uint16
+		var packetID uint64
+		var index, extType uint16
 		var raw string
-		if err := rows.Scan(&index, &extType, &raw); err != nil {
+		if err := rows.Scan(&packetID, &index, &extType, &raw); err != nil {
 			return nil, fmt.Errorf("scan ipv6 ext: %w", err)
 		}
-		componentsList = append(componentsList, &components.IPv6ExtComponent{
+		m[packetID] = append(m[packetID], &components.IPv6ExtComponent{
 			CaptureID: captureID,
 			PacketID:  packetID,
 			ExtIndex:  index,
@@ -414,31 +555,34 @@ func (c *Client) fetchIPv6Ext(ctx context.Context, captureID uuid.UUID, packetID
 			ExtRaw:    []byte(raw),
 		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate ipv6 ext: %w", err)
-	}
-	if len(componentsList) == 0 {
-		return nil, fmt.Errorf("missing ipv6 ext component for %s/%d", captureID, packetID)
-	}
-	return componentsList, nil
+	return m, rows.Err()
 }
 
-func (c *Client) fetchRawTail(ctx context.Context, captureID uuid.UUID, packetID uint64) (*components.RawTailComponent, error) {
-	query := fmt.Sprintf("SELECT tail_offset, bytes FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1", c.rawTailTable())
-	var offset uint16
-	var raw string
-	if err := c.conn.QueryRow(ctx, query, captureID, packetID).Scan(&offset, &raw); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("missing raw tail for %s/%d", captureID, packetID)
-		}
+func (c *Client) fetchRawTailBatch(ctx context.Context, captureID uuid.UUID, packetIDs []uint64) (map[uint64]*components.RawTailComponent, error) {
+	inClause, args := batchArgs(captureID, packetIDs)
+	query := fmt.Sprintf("SELECT packet_id, tail_offset, bytes FROM %s WHERE capture_id = ? AND packet_id IN %s", c.rawTailTable(), inClause)
+	rows, err := c.conn.Query(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("fetch raw tail: %w", err)
 	}
-	return &components.RawTailComponent{
-		CaptureID:  captureID,
-		PacketID:   packetID,
-		TailOffset: offset,
-		Bytes:      []byte(raw),
-	}, nil
+	defer rows.Close()
+
+	m := make(map[uint64]*components.RawTailComponent)
+	for rows.Next() {
+		var packetID uint64
+		var offset uint16
+		var raw string
+		if err := rows.Scan(&packetID, &offset, &raw); err != nil {
+			return nil, fmt.Errorf("scan raw tail: %w", err)
+		}
+		m[packetID] = &components.RawTailComponent{
+			CaptureID:  captureID,
+			PacketID:   packetID,
+			TailOffset: offset,
+			Bytes:      []byte(raw),
+		}
+	}
+	return m, rows.Err()
 }
 
 func parseAddr(value string) netip.Addr {

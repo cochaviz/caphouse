@@ -165,7 +165,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 	logger.Info("ingesting", "source", srcLabel, "sensor", cfg.sensor)
 
 	start := time.Now()
-	stopBar := startProgressBar(fileSize, &p, start, cfg.silent)
+	stopBar := startProgressBar(fileSize, -1, &p, start, cfg.silent)
 
 	id, err := ingestPCAPStream(ctx, client, cr, captureID, cfg.sensor, &p)
 	stopBar()
@@ -194,6 +194,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	}
 
 	ctx := context.Background()
+	logger := newLogger(cfg.debug, cfg.silent)
 
 	client, err := newClient(ctx, cfg)
 	if err != nil {
@@ -201,11 +202,24 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	}
 	defer client.Close()
 
-	rc, err := client.ExportCapture(ctx, captureID)
+	totalPackets, err := client.CountPackets(ctx, captureID)
+	if err != nil {
+		logger.Warn("could not count packets", "err", err)
+		totalPackets = -1
+	}
+
+	var p ingestProgress
+	rc, err := client.ExportCaptureWithProgress(ctx, captureID, &p.packets)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
+
+	destLabel := cfg.filePath
+	if destLabel == "" || destLabel == "-" {
+		destLabel = "stdout"
+	}
+	logger.Info("exporting", "capture_id", captureID, "dest", destLabel)
 
 	out := io.Writer(cmd.OutOrStdout())
 	if cfg.filePath != "" && cfg.filePath != "-" {
@@ -217,8 +231,22 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 		out = f
 	}
 
-	_, err = io.Copy(out, rc)
-	return err
+	start := time.Now()
+	stopBar := startProgressBar(-1, totalPackets, &p, start, cfg.silent)
+
+	n, err := io.Copy(out, &countingReader{r: rc, p: &p})
+	stopBar()
+
+	if err != nil {
+		return err
+	}
+
+	logger.Info("done",
+		"capture_id", captureID,
+		"bytes", n,
+		"elapsed", time.Since(start).Truncate(time.Millisecond),
+	)
+	return nil
 }
 
 // openSource opens the PCAP source (file or stdin). For files with an
