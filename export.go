@@ -94,7 +94,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 		return err
 	}
 
-	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC", c.packetsTable())
+	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY ts ASC, packet_id ASC", c.packetsTable())
 	rows, err := c.conn.Query(ctx, query, captureID)
 	if err != nil {
 		return fmt.Errorf("query packets: %w", err)

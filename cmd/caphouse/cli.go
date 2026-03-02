@@ -5,11 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"caphouse"
@@ -147,7 +150,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 		return err
 	}
 
-	src, fileSize, captureID, err := openSource(cfg.filePath, captureID, isNew, logger)
+	src, fileSize, captureID, packetIDBase, err := openSource(cfg.filePath, captureID, isNew, logger)
 	if err != nil {
 		return err
 	}
@@ -167,7 +170,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 	start := time.Now()
 	stopBar := startProgressBar(fileSize, -1, &p, start, cfg.silent)
 
-	id, err := ingestPCAPStream(ctx, client, cr, captureID, cfg.sensor, &p)
+	id, err := ingestPCAPStream(ctx, client, cr, captureID, cfg.sensor, &p, packetIDBase)
 	stopBar()
 
 	if err != nil {
@@ -249,18 +252,17 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	return nil
 }
 
-// openSource opens the PCAP source (file or stdin). For files with an
-// auto-generated capture ID it also derives a stable content-addressed ID and
-// seeks the file back to the start. Returns the reader, file size (-1 for
-// stdin), and the (possibly updated) capture ID.
-func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.Logger) (io.Reader, int64, uuid.UUID, error) {
+// openSource opens the PCAP source (file or stdin). For files it computes a
+// SHA-256 of the basename and contents to derive a stable capture ID (when
+// isNew) and a deterministic packetIDBase. Stdin always returns packetIDBase=0.
+func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.Logger) (io.Reader, int64, uuid.UUID, uint64, error) {
 	if filePath == "" || filePath == "-" {
-		return os.Stdin, -1, captureID, nil
+		return os.Stdin, -1, captureID, 0, nil
 	}
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, 0, uuid.Nil, fmt.Errorf("open pcap: %w", err)
+		return nil, 0, uuid.Nil, 0, fmt.Errorf("open pcap: %w", err)
 	}
 
 	var fileSize int64 = -1
@@ -268,27 +270,33 @@ func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.L
 		fileSize = fi.Size()
 	}
 
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00", filepath.Base(filePath))
+	if _, err := io.Copy(h, f); err != nil {
+		f.Close()
+		return nil, 0, uuid.Nil, 0, fmt.Errorf("hash pcap: %w", err)
+	}
+	sum := h.Sum(nil)
+
 	if isNew {
-		// Derive a stable, content-addressed capture ID from the file name and
-		// contents so that re-ingesting the same file produces the same UUID
-		// and ClickHouse deduplication works.
-		stableID, err := stableCaptureID(filePath, f)
-		if err != nil {
-			f.Close()
-			return nil, 0, uuid.Nil, err
-		}
-		captureID = stableID
+		captureID = uuid.NewSHA1(capHouseNamespace, sum)
 		logger.Debug("stable capture_id derived", "source", filePath, "capture_id", captureID)
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			f.Close()
-			return nil, 0, uuid.Nil, fmt.Errorf("seek pcap: %w", err)
-		}
 	}
 
-	return f, fileSize, captureID, nil
+	// Bytes 8–11 of the SHA-256 are distinct from the UUID derivation (which
+	// uses all 16 bytes via uuid.NewSHA1). Shift left 32 to reserve the lower
+	// 32 bits for the per-file sequential offset.
+	packetIDBase := uint64(binary.BigEndian.Uint32(sum[8:12])) << 32
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		f.Close()
+		return nil, 0, uuid.Nil, 0, fmt.Errorf("seek pcap: %w", err)
+	}
+
+	return f, fileSize, captureID, packetIDBase, nil
 }
 
-func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress) (uuid.UUID, error) {
+func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress, packetIDBase uint64) (uuid.UUID, error) {
 	br := bufio.NewReader(r)
 	header := make([]byte, 24)
 	if _, err := io.ReadFull(br, header); err != nil {
@@ -316,7 +324,7 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 		return uuid.Nil, fmt.Errorf("pcap reader: %w", err)
 	}
 
-	var packetID uint64
+	var seq uint64
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if errors.Is(err, io.EOF) {
@@ -328,7 +336,7 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 
 		packet := caphouse.Packet{
 			CaptureID: capID,
-			PacketID:  packetID,
+			PacketID:  packetIDBase | seq,
 			Timestamp: ci.Timestamp,
 			InclLen:   uint32(ci.CaptureLength),
 			OrigLen:   uint32(ci.Length),
@@ -337,7 +345,7 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 		if err := client.IngestPacket(ctx, meta.LinkType, packet); err != nil {
 			return uuid.Nil, err
 		}
-		packetID++
+		seq++
 		p.packets.Add(1)
 	}
 
