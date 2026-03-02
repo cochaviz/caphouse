@@ -13,6 +13,12 @@ the original PCAP losslessly on demand.
 ## Install
 
 ```sh
+go install github.com/cochaviz/caphouse@latest
+```
+
+Or build from source:
+
+```sh
 go build -o caphouse ./cmd/caphouse
 ```
 
