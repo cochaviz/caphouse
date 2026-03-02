@@ -82,33 +82,30 @@ caphouse -w --dsn="..." --capture=<uuid> | tcpreplay --intf1=eth0 -
 
 ## Continuous capture with bounded disk usage
 
-caphouse reads discrete files — it does not do live capture. For continuous
-capture with a bounded on-disk footprint, combine tcpdump's built-in rotation
-with a small wrapper script:
+caphouse reads discrete files — it does not do live capture. The companion
+script `caphouse-monitor` wraps tcpdump's built-in rotation with caphouse
+ingest: each completed file is ingested into ClickHouse and then removed.
 
 ```sh
-#!/bin/sh
-# Rotate every 100 MB, keep at most 10 files on disk (~1 GB ring buffer).
-# Each file is ingested and deleted as soon as tcpdump closes it.
-
-DSN="clickhouse://user:pass@localhost:9000/default"
-SENSOR="myhost"
-DIR="/var/capture"
-
-tcpdump -i eth0 -C 100 -W 10 -w "$DIR/ring" &
-
-inotifywait -m -e close_write --format '%w%f' "$DIR" | while read -r FILE; do
-    caphouse --dsn="$DSN" --sensor="$SENSOR" --file="$FILE" && rm -f "$FILE"
-done
+caphouse-monitor -i eth0 -d "clickhouse://user:pass@localhost:9000/default" -s myhost
 ```
 
-Files are only removed after a successful ingest (`&&`). If ClickHouse is
-temporarily unavailable, caphouse retries with exponential backoff and jitter
-before giving up; if it ultimately fails, the file is left on disk for the next
-rotation cycle to attempt again.
+By default, tcpdump rotates every 100 MB and keeps at most 10 files on disk
+(~1 GB ring buffer). Override with `-C SIZE` and `-W COUNT`:
 
-> On macOS, replace `inotifywait -m -e close_write` with
-> `fswatch -e Updated --event IsFile "$DIR"`.
+```sh
+caphouse-monitor -i eth0 -d "..." -s myhost -C 50 -W 20  # 50 MB files, up to 20 (~1 GB)
+```
+
+DSN and sensor can also be provided via `CAPHOUSE_DSN` and `CAPHOUSE_SENSOR`.
+
+Files are only removed after a successful ingest. If ClickHouse is temporarily
+unavailable, caphouse retries with exponential backoff and jitter before giving
+up; if it ultimately fails, the file is left on disk for the next rotation cycle
+to attempt again.
+
+`caphouse-monitor` is installed alongside `caphouse` by `make install`. It uses
+`inotifywait` on Linux and `fswatch` on macOS to detect completed rotation files.
 
 ## Storage model
 

@@ -1,0 +1,78 @@
+#!/bin/sh
+# caphouse-monitor – continuous capture with bounded on-disk footprint.
+#
+# Wraps tcpdump's built-in file rotation with caphouse ingest: each completed
+# rotation file is ingested into ClickHouse and then removed. At most
+# COUNT * SIZE MB of PCAP data lives on disk at any time.
+
+set -eu
+
+IFACE=
+DSN="${CAPHOUSE_DSN:-}"
+SENSOR="${CAPHOUSE_SENSOR:-}"
+SIZE=100
+COUNT=10
+DIR=/var/capture
+
+usage() {
+    cat <<EOF
+Usage: caphouse-monitor -i IFACE [OPTIONS]
+
+Continuously capture on IFACE using tcpdump rotation, ingesting each
+completed file into ClickHouse and removing it on success.
+
+Options:
+  -i IFACE     Network interface to capture on (required)
+  -d DSN       ClickHouse DSN (default: \$CAPHOUSE_DSN)
+  -s SENSOR    Sensor name (default: \$CAPHOUSE_SENSOR)
+  -C SIZE      Rotate after SIZE MB (default: $SIZE)
+  -W COUNT     Keep at most COUNT files on disk (default: $COUNT)
+  -D DIR       Directory for rotation files (default: $DIR)
+  -h           Show this help
+EOF
+}
+
+while getopts 'i:d:s:C:W:D:h' opt; do
+    case $opt in
+        i) IFACE=$OPTARG ;;
+        d) DSN=$OPTARG ;;
+        s) SENSOR=$OPTARG ;;
+        C) SIZE=$OPTARG ;;
+        W) COUNT=$OPTARG ;;
+        D) DIR=$OPTARG ;;
+        h) usage; exit 0 ;;
+        *) usage >&2; exit 1 ;;
+    esac
+done
+
+[ -n "$IFACE"  ] || { echo "caphouse-monitor: -i IFACE is required" >&2; exit 1; }
+[ -n "$DSN"    ] || { echo "caphouse-monitor: DSN is required (-d or CAPHOUSE_DSN)" >&2; exit 1; }
+[ -n "$SENSOR" ] || { echo "caphouse-monitor: sensor is required (-s or CAPHOUSE_SENSOR)" >&2; exit 1; }
+
+mkdir -p "$DIR"
+
+# Export so caphouse picks them up from the environment.
+export CAPHOUSE_DSN="$DSN"
+export CAPHOUSE_SENSOR="$SENSOR"
+
+# Start tcpdump in the background; kill it when we exit.
+tcpdump -i "$IFACE" -C "$SIZE" -W "$COUNT" -w "$DIR/ring" &
+TCPDUMP_PID=$!
+trap 'kill "$TCPDUMP_PID" 2>/dev/null; wait "$TCPDUMP_PID" 2>/dev/null' INT TERM EXIT
+
+ingest() {
+    caphouse --file="$1" && rm -f "$1"
+}
+
+case "$(uname)" in
+    Darwin)
+        fswatch -e Updated --event IsFile "$DIR" | while read -r FILE; do
+            ingest "$FILE"
+        done
+        ;;
+    *)
+        inotifywait -m -e close_write --format '%w%f' "$DIR" | while read -r FILE; do
+            ingest "$FILE"
+        done
+        ;;
+esac

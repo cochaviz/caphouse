@@ -11,7 +11,8 @@ else
 BASHDIR := $(PREFIX)/share/bash-completion/completions
 endif
 
-BIN := caphouse
+BIN     := caphouse
+MONITOR := caphouse-monitor
 
 .PHONY: all build man completions install uninstall clean
 
@@ -32,6 +33,7 @@ completions: build
 install: build man completions
 	install -d $(DESTDIR)$(BINDIR)
 	install -m755 $(BIN) $(DESTDIR)$(BINDIR)/$(BIN)
+	install -m755 scripts/$(MONITOR) $(DESTDIR)$(BINDIR)/$(MONITOR)
 	install -d $(DESTDIR)$(MANDIR)
 	install -m644 man/man1/*.1 $(DESTDIR)$(MANDIR)/
 	install -d $(DESTDIR)$(BASHDIR)
@@ -43,6 +45,7 @@ install: build man completions
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(BIN)
+	rm -f $(DESTDIR)$(BINDIR)/$(MONITOR)
 	rm -f $(DESTDIR)$(MANDIR)/$(BIN)*.1
 	rm -f $(DESTDIR)$(BASHDIR)/$(BIN)
 	rm -f $(DESTDIR)$(ZSHDIR)/_$(BIN)
