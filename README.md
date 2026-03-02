@@ -143,6 +143,23 @@ export. No packet is ever silently dropped.
 - **Partial reconstruction.** Payload bytes live in `pcap_raw_tail`, separate
   from header metadata, so header columns stay small.
 
+### Compression
+
+Sequential and monotonic columns carry explicit codecs:
+
+| Column | Tables | Codec |
+|--------|--------|-------|
+| `packet_id` | all | `Delta, LZ4` — differences are always 1 |
+| `ts` | packets, ipv4, ipv6 | `DoubleDelta, LZ4` — monotonically increasing nanosecond timestamps |
+| `incl_len`, `orig_len` | packets | `Delta, LZ4` — lengths cluster tightly |
+| `tail_offset` | packets, raw\_tail | `Delta, LZ4` |
+| `ipv4_total_len`, `ipv6_payload_len` | ipv4, ipv6 | `Delta, LZ4` |
+| MAC addresses | ethernet | `FixedString(6)` — raw 6 bytes instead of a 17-char formatted string |
+
+**Possible future improvements** (not yet implemented):
+- `LowCardinality` on `protocol`, `eth_type`, `ipv4_ttl`, `ipv6_hop_limit`, `codec_version`, `parsed_ok` — these have tiny dictionaries (< 256 distinct values) and dictionary encoding would further reduce both storage and scan cost.
+- Raise `CODEC(ZSTD)` to `CODEC(ZSTD(3))` on blob columns (`frame_raw`, `bytes`) — roughly 10–20 % better ratio at ~2× slower write throughput.
+
 ### Deduplication
 
 All tables use `ReplacingMergeTree`. Duplicates are removed during background

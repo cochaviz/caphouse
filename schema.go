@@ -54,15 +54,15 @@ ORDER BY (sensor_id, created_at, capture_id)`, capturesTable)
 	createPackets := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s
 (
-  capture_id UUID,
-  packet_id UInt64,
-  ts DateTime64(9),
-  incl_len UInt32,
-  orig_len UInt32,
-  components UInt128,
-  tail_offset UInt16,
-  frame_raw String CODEC(ZSTD),
-  frame_hash FixedString(32) CODEC(ZSTD)
+  capture_id  UUID,
+  packet_id   UInt64          CODEC(Delta,       LZ4),
+  ts          DateTime64(9)   CODEC(DoubleDelta, LZ4),
+  incl_len    UInt32          CODEC(Delta,       LZ4),
+  orig_len    UInt32          CODEC(Delta,       LZ4),
+  components  UInt128,
+  tail_offset UInt16          CODEC(Delta,       LZ4),
+  frame_raw   String          CODEC(ZSTD),
+  frame_hash  FixedString(32) CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree
 PARTITION BY toDate(ts)
