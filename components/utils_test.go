@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/column"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
@@ -24,6 +25,7 @@ func (b *fakeBatch) Append(v ...any) error {
 	return nil
 }
 func (b *fakeBatch) AppendStruct(v any) error { return nil }
+func (b *fakeBatch) Columns() []column.Interface { return nil }
 func (b *fakeBatch) Column(int) driver.BatchColumn {
 	return fakeBatchColumn{}
 }

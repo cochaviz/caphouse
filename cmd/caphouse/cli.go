@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -283,10 +282,7 @@ func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.L
 		logger.Debug("stable capture_id derived", "source", filePath, "capture_id", captureID)
 	}
 
-	// Bytes 8–11 of the SHA-256 are distinct from the UUID derivation (which
-	// uses all 16 bytes via uuid.NewSHA1). Shift left 32 to reserve the lower
-	// 32 bits for the per-file sequential offset.
-	packetIDBase := uint64(binary.BigEndian.Uint32(sum[8:12])) << 32
+	packetIDBase := sumToPacketIDBase(sum)
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		f.Close()

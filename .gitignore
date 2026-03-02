@@ -1,4 +1,5 @@
-caphouse
+./caphouse/
+./caphouse
 man/
 completions/
 *.pcap 
