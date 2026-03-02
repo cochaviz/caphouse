@@ -4,11 +4,14 @@ package caphouse
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,8 +46,8 @@ func TestMain(m *testing.M) {
 	}
 
 	compressionClient, err = New(ctx, Config{
-		DSN:      dsn,
-		Database: "caphouse_compression",
+		DSN:       dsn,
+		Database:  "caphouse_compression",
 		BatchSize: 50000,
 	})
 	if err != nil {
@@ -156,27 +159,57 @@ func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) {
 	}
 }
 
-// TestCompressionRatio ingests test.pcap and reports how much space the data
-// occupies in ClickHouse relative to the original file. Sizes are derived from
-// the delta between two system.parts snapshots so the result reflects only this
-// ingest.
+// compressedSize returns the byte count after compressing data with xz -9
+// (if xz is available) or gzip -9 as a fallback. The method name is also
+// returned so the log line is self-describing.
+func compressedSize(data []byte) (size uint64, method string) {
+	cmd := exec.Command("xz", "--compress", "--stdout", "-9")
+	cmd.Stdin = bytes.NewReader(data)
+	if out, err := cmd.Output(); err == nil {
+		return uint64(len(out)), "xz -9"
+	}
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = w.Write(data)
+	_ = w.Close()
+	return uint64(buf.Len()), "gzip -9"
+}
+
+// TestCompressionRatio ingests each PCAP in testdata/ and reports how much
+// space the data occupies in ClickHouse relative to the original file. Sizes
+// are derived from the delta between two system.parts snapshots so the result
+// reflects only that one ingest.
 func TestCompressionRatio(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("testdata/test.pcap")
+	paths, err := filepath.Glob("testdata/*.pcap")
 	if err != nil {
-		t.Fatalf("read testdata/test.pcap: %v", err)
+		t.Fatalf("glob testdata: %v", err)
 	}
+	if len(paths) == 0 {
+		t.Fatal("no pcap files found in testdata/")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
 
-	beforeC, beforeU := storageSnapshot(t, ctx)
-	ingestPCAP(t, ctx, pcapData)
-	afterC, afterU := storageSnapshot(t, ctx)
+			beforeC, beforeU := storageSnapshot(t, ctx)
+			ingestPCAP(t, ctx, pcapData)
+			afterC, afterU := storageSnapshot(t, ctx)
 
-	deltaC := afterC - beforeC
-	deltaU := afterU - beforeU
-	fileSize := uint64(len(pcapData))
+			deltaC := afterC - beforeC
+			deltaU := afterU - beforeU
+			fileSize := uint64(len(pcapData))
+			refSz, refMethod := compressedSize(pcapData)
 
-	t.Logf("PCAP file:                  %s", fmtBytes(fileSize))
-	t.Logf("ClickHouse logical size:    %s  (%.2fx file)", fmtBytes(deltaU), float64(deltaU)/float64(fileSize))
-	t.Logf("ClickHouse compressed size: %s  (%.2fx file)", fmtBytes(deltaC), float64(deltaC)/float64(fileSize))
-	t.Logf("Internal compress ratio:    %.2fx  (logical → disk)", float64(deltaU)/float64(deltaC))
+			t.Logf("PCAP file:                  %s", fmtBytes(fileSize))
+			t.Logf("%s compressed:       %s  (%.2fx file)", refMethod, fmtBytes(refSz), float64(refSz)/float64(fileSize))
+			t.Logf("ClickHouse logical size:    %s  (%.2fx file)", fmtBytes(deltaU), float64(deltaU)/float64(fileSize))
+			t.Logf("ClickHouse compressed size: %s  (%.2fx file)", fmtBytes(deltaC), float64(deltaC)/float64(fileSize))
+			t.Logf("Internal compress ratio:    %.2fx  (logical → disk)", float64(deltaU)/float64(deltaC))
+			t.Logf("vs %s:              %.2fx", refMethod, float64(deltaC)/float64(refSz))
+		})
+	}
 }

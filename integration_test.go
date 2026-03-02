@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -65,61 +66,73 @@ func TestMain(m *testing.M) {
 
 // TestE2ERoundtrip verifies the core library contract: ingest a PCAP through
 // the raw API (CreateCapture → IngestPacket → Flush) and export byte-for-byte.
+// Runs once per PCAP file found in testdata/.
 func TestE2ERoundtrip(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("testdata/test.pcap")
+	paths, err := filepath.Glob("testdata/*.pcap")
 	if err != nil {
-		t.Fatalf("read testdata/test.pcap: %v", err)
+		t.Fatalf("glob testdata: %v", err)
 	}
+	if len(paths) == 0 {
+		t.Fatal("no pcap files found in testdata/")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
 
-	meta, err := ParseGlobalHeader(pcapData[:24])
-	if err != nil {
-		t.Fatalf("parse global header: %v", err)
-	}
-	meta.CaptureID = uuid.New()
-	meta.SensorID = "test"
-	meta.CreatedAt = time.Now()
-	meta.GlobalHeaderRaw = pcapData[:24]
+			meta, err := ParseGlobalHeader(pcapData[:24])
+			if err != nil {
+				t.Fatalf("parse global header: %v", err)
+			}
+			meta.CaptureID = uuid.New()
+			meta.SensorID = "test"
+			meta.CreatedAt = time.Now()
+			meta.GlobalHeaderRaw = pcapData[:24]
 
-	captureID, err := integrationClient.CreateCapture(ctx, meta)
-	if err != nil {
-		t.Fatalf("create capture: %v", err)
-	}
+			captureID, err := integrationClient.CreateCapture(ctx, meta)
+			if err != nil {
+				t.Fatalf("create capture: %v", err)
+			}
 
-	reader, err := pcapgo.NewReader(bytes.NewReader(pcapData))
-	if err != nil {
-		t.Fatalf("pcapgo reader: %v", err)
-	}
-	var seq uint64
-	for {
-		frame, ci, err := reader.ReadPacketData()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("read packet: %v", err)
-		}
-		if err := integrationClient.IngestPacket(ctx, meta.LinkType, Packet{
-			CaptureID: captureID,
-			PacketID:  seq,
-			Timestamp: ci.Timestamp,
-			InclLen:   uint32(ci.CaptureLength),
-			OrigLen:   uint32(ci.Length),
-			Frame:     frame,
-		}); err != nil {
-			t.Fatalf("ingest packet %d: %v", seq, err)
-		}
-		seq++
-	}
-	if err := integrationClient.Flush(ctx); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
+			reader, err := pcapgo.NewReader(bytes.NewReader(pcapData))
+			if err != nil {
+				t.Fatalf("pcapgo reader: %v", err)
+			}
+			var seq uint64
+			for {
+				frame, ci, err := reader.ReadPacketData()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatalf("read packet: %v", err)
+				}
+				if err := integrationClient.IngestPacket(ctx, meta.LinkType, Packet{
+					CaptureID: captureID,
+					PacketID:  seq,
+					Timestamp: ci.Timestamp,
+					InclLen:   uint32(ci.CaptureLength),
+					OrigLen:   uint32(ci.Length),
+					Frame:     frame,
+				}); err != nil {
+					t.Fatalf("ingest packet %d: %v", seq, err)
+				}
+				seq++
+			}
+			if err := integrationClient.Flush(ctx); err != nil {
+				t.Fatalf("flush: %v", err)
+			}
 
-	got, err := integrationClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
-	}
-	if !bytes.Equal(got, pcapData) {
-		t.Fatalf("exported pcap does not match original (got %d bytes, want %d)", len(got), len(pcapData))
+			got, err := integrationClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			if !bytes.Equal(got, pcapData) {
+				t.Fatalf("exported pcap does not match original (got %d bytes, want %d)", len(got), len(pcapData))
+			}
+		})
 	}
 }

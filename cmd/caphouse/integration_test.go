@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -212,154 +213,190 @@ func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData
 	// Intentionally no Flush — simulates crash.
 }
 
+// pcapPaths returns all *.pcap files under testdata/ relative to this package.
+func pcapPaths(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob("../../testdata/*.pcap")
+	if err != nil {
+		t.Fatalf("glob testdata: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no pcap files found in testdata/")
+	}
+	return paths
+}
+
 // --- tests -------------------------------------------------------------------
 
-// TestE2EDuplicateIngest ingests test.pcap twice and verifies deduplication.
+// TestE2EDuplicateIngest ingests each PCAP twice and verifies deduplication.
 func TestE2EDuplicateIngest(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("../../testdata/test.pcap")
-	if err != nil {
-		t.Fatalf("read test.pcap: %v", err)
-	}
-	captureID := uuid.New()
-	ingestAll(ctx, t, captureID, pcapData, "test.pcap")
-	ingestAll(ctx, t, captureID, pcapData, "test.pcap")
+	for _, path := range pcapPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			name := filepath.Base(path)
+			captureID := uuid.New()
+			ingestAll(ctx, t, captureID, pcapData, name)
+			ingestAll(ctx, t, captureID, pcapData, name)
 
-	got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
+			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
+		})
 	}
-	compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 }
 
 // TestE2EPartialCrashResume simulates dropping the unflushed batch on crash,
 // then completing the ingest. Export must match the original.
 func TestE2EPartialCrashResume(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("../../testdata/test.pcap")
-	if err != nil {
-		t.Fatalf("read test.pcap: %v", err)
-	}
-	total := len(parsePackets(t, pcapData))
-	if total < 2 {
-		t.Skip("need at least 2 packets")
-	}
-	captureID := uuid.New()
-	crashAfter(ctx, t, captureID, pcapData, "test.pcap", total/2)
-	ingestAll(ctx, t, captureID, pcapData, "test.pcap")
+	for _, path := range pcapPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			name := filepath.Base(path)
+			total := len(parsePackets(t, pcapData))
+			if total < 2 {
+				t.Skip("need at least 2 packets")
+			}
+			captureID := uuid.New()
+			crashAfter(ctx, t, captureID, pcapData, name, total/2)
+			ingestAll(ctx, t, captureID, pcapData, name)
 
-	got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
+			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
+		})
 	}
-	compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 }
 
 // TestE2EFlushBeforeCrash flushes the partial batch before the crash,
 // then re-ingests everything. Export must match after deduplication.
 func TestE2EFlushBeforeCrash(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("../../testdata/test.pcap")
-	if err != nil {
-		t.Fatalf("read test.pcap: %v", err)
-	}
-	total := len(parsePackets(t, pcapData))
-	if total < 2 {
-		t.Skip("need at least 2 packets")
-	}
-	captureID := uuid.New()
-	crashAfter(ctx, t, captureID, pcapData, "test.pcap", total/2)
-	if err := cliClient.Flush(ctx); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-	ingestAll(ctx, t, captureID, pcapData, "test.pcap")
+	for _, path := range pcapPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			name := filepath.Base(path)
+			total := len(parsePackets(t, pcapData))
+			if total < 2 {
+				t.Skip("need at least 2 packets")
+			}
+			captureID := uuid.New()
+			crashAfter(ctx, t, captureID, pcapData, name, total/2)
+			if err := cliClient.Flush(ctx); err != nil {
+				t.Fatalf("flush: %v", err)
+			}
+			ingestAll(ctx, t, captureID, pcapData, name)
 
-	got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
+			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
+		})
 	}
-	compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 }
 
-// TestE2EConcurrentRings splits test.pcap into 2 ring files and ingests them
+// TestE2EConcurrentRings splits each PCAP into 2 ring files and ingests them
 // concurrently under the same captureID.
 func TestE2EConcurrentRings(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("../../testdata/test.pcap")
-	if err != nil {
-		t.Fatalf("read test.pcap: %v", err)
-	}
-	rings := splitPCAP(t, pcapData, 2)
-	captureID := uuid.New()
-
-	var wg sync.WaitGroup
-	for i, ring := range rings {
-		wg.Add(1)
-		ringData := ring
-		ringName := fmt.Sprintf("ring%d.pcap", i)
-		go func() {
-			defer wg.Done()
-			ingestAll(ctx, t, captureID, ringData, ringName)
-		}()
-	}
-	wg.Wait()
-
-	got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
-	}
-	gotPkts := parsePackets(t, got)
-	wantPkts := parsePackets(t, pcapData)
-	if len(gotPkts) != len(wantPkts) {
-		t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))
-	}
-	sortPkts := func(ps []parsedPkt) {
-		sort.Slice(ps, func(i, j int) bool {
-			if ti, tj := ps[i].ts.UnixNano(), ps[j].ts.UnixNano(); ti != tj {
-				return ti < tj
+	for _, path := range pcapPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
 			}
-			return bytes.Compare(ps[i].data, ps[j].data) < 0
+			rings := splitPCAP(t, pcapData, 2)
+			captureID := uuid.New()
+
+			var wg sync.WaitGroup
+			for i, ring := range rings {
+				wg.Add(1)
+				ringData := ring
+				ringName := fmt.Sprintf("ring%d.pcap", i)
+				go func() {
+					defer wg.Done()
+					ingestAll(ctx, t, captureID, ringData, ringName)
+				}()
+			}
+			wg.Wait()
+
+			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			gotPkts := parsePackets(t, got)
+			wantPkts := parsePackets(t, pcapData)
+			if len(gotPkts) != len(wantPkts) {
+				t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))
+			}
+			sortPkts := func(ps []parsedPkt) {
+				sort.Slice(ps, func(i, j int) bool {
+					if ti, tj := ps[i].ts.UnixNano(), ps[j].ts.UnixNano(); ti != tj {
+						return ti < tj
+					}
+					return bytes.Compare(ps[i].data, ps[j].data) < 0
+				})
+			}
+			sortPkts(gotPkts)
+			sortPkts(wantPkts)
+			compareParsed(t, gotPkts, wantPkts)
 		})
 	}
-	sortPkts(gotPkts)
-	sortPkts(wantPkts)
-	compareParsed(t, gotPkts, wantPkts)
 }
 
-// TestE2EMonitorRings splits test.pcap into 3 ring files (replicating what
+// TestE2EMonitorRings splits each PCAP into 3 ring files (replicating what
 // caphouse-monitor does) and ingests each under the same captureID.
 func TestE2EMonitorRings(t *testing.T) {
 	ctx := context.Background()
-	pcapData, err := os.ReadFile("../../testdata/test.pcap")
-	if err != nil {
-		t.Fatalf("read test.pcap: %v", err)
-	}
-	const nRings = 3
-	rings := splitPCAP(t, pcapData, nRings)
-	captureID := uuid.New()
-
-	for i, ring := range rings {
-		ingestAll(ctx, t, captureID, ring, fmt.Sprintf("ring%d.pcap", i))
-	}
-
-	got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-	if err != nil {
-		t.Fatalf("export: %v", err)
-	}
-	gotPkts := parsePackets(t, got)
-	wantPkts := parsePackets(t, pcapData)
-	if len(gotPkts) != len(wantPkts) {
-		t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))
-	}
-	sortPkts := func(ps []parsedPkt) {
-		sort.Slice(ps, func(i, j int) bool {
-			if ti, tj := ps[i].ts.UnixNano(), ps[j].ts.UnixNano(); ti != tj {
-				return ti < tj
+	for _, path := range pcapPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			pcapData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
 			}
-			return bytes.Compare(ps[i].data, ps[j].data) < 0
+			const nRings = 3
+			rings := splitPCAP(t, pcapData, nRings)
+			captureID := uuid.New()
+
+			for i, ring := range rings {
+				ingestAll(ctx, t, captureID, ring, fmt.Sprintf("ring%d.pcap", i))
+			}
+
+			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			gotPkts := parsePackets(t, got)
+			wantPkts := parsePackets(t, pcapData)
+			if len(gotPkts) != len(wantPkts) {
+				t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))
+			}
+			sortPkts := func(ps []parsedPkt) {
+				sort.Slice(ps, func(i, j int) bool {
+					if ti, tj := ps[i].ts.UnixNano(), ps[j].ts.UnixNano(); ti != tj {
+						return ti < tj
+					}
+					return bytes.Compare(ps[i].data, ps[j].data) < 0
+				})
+			}
+			sortPkts(gotPkts)
+			sortPkts(wantPkts)
+			compareParsed(t, gotPkts, wantPkts)
 		})
 	}
-	sortPkts(gotPkts)
-	sortPkts(wantPkts)
-	compareParsed(t, gotPkts, wantPkts)
 }
