@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -187,6 +188,36 @@ func newClient(ctx context.Context, cfg config, logger *slog.Logger) (*caphouse.
 		Debug:         cfg.debug,
 		Logger:        logger,
 	})
+}
+
+// resolveVersion returns the binary version string derived from VCS metadata
+// embedded by the Go toolchain at build time:
+//  1. Module version (set by go install module@vX.Y.Z or a tagged build)
+//  2. Short VCS commit hash (dev builds from a git working tree)
+//  3. "dev" fallback when no build info is available
+func resolveVersion() string {
+	const fallback = "dev"
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+		if rev := lookupBuildSetting(info.Settings, "vcs.revision"); rev != "" {
+			if len(rev) > 7 {
+				rev = rev[:7]
+			}
+			return fmt.Sprintf("%s (%s)", fallback, rev)
+		}
+	}
+	return fallback
+}
+
+func lookupBuildSetting(settings []debug.BuildSetting, key string) string {
+	for _, s := range settings {
+		if s.Key == key {
+			return s.Value
+		}
+	}
+	return ""
 }
 
 // firstNonEmpty returns the first non-empty string from vals.

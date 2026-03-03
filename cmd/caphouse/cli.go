@@ -57,9 +57,11 @@ func rootCmd() *cobra.Command {
 	var silent bool
 
 	cmd := &cobra.Command{
-		Use:          "caphouse",
-		Short:        "Store and export classic PCAPs in ClickHouse",
-		Long:         longDescription,
+		Use:     "caphouse",
+		Short:   "Store and export classic PCAPs in ClickHouse",
+		Long:    longDescription,
+		Version: resolveVersion(),
+
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if readMode && writeMode {
