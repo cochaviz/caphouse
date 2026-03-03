@@ -1,5 +1,5 @@
-./caphouse/
-./caphouse
+caphouse
+testresults/
 man/
 completions/
 *.pcap 
