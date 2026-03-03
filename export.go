@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -188,53 +189,92 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 	return nil
 }
 
-// batchArgs returns the IN-clause placeholder and args slice for a batch query.
-// args[0] is captureID; args[1:] are the packet IDs.
-func batchArgs(captureID uuid.UUID, packetIDs []uint64) (string, []any) {
-	var b strings.Builder
-	b.WriteByte('(')
-	for i := range packetIDs {
-		if i > 0 {
-			b.WriteByte(',')
+type idRange struct{ lo, hi uint64 }
+
+// toRanges compresses packet IDs into the minimal set of contiguous ranges.
+// For sequential ingests (IDs 0,1,2,...) the whole batch becomes one range.
+func toRanges(ids []uint64) []idRange {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := make([]uint64, len(ids))
+	copy(sorted, ids)
+	slices.Sort(sorted)
+
+	ranges := []idRange{{sorted[0], sorted[0]}}
+	for _, id := range sorted[1:] {
+		if id == ranges[len(ranges)-1].hi+1 {
+			ranges[len(ranges)-1].hi = id
+		} else {
+			ranges = append(ranges, idRange{id, id})
 		}
-		b.WriteByte('?')
+	}
+	return ranges
+}
+
+// rangeArgs returns the WHERE clause fragment and args for a set of id ranges.
+// args[0] is captureID; subsequent pairs are (lo, hi) per range.
+func rangeArgs(captureID uuid.UUID, ranges []idRange) (string, []any) {
+	var b strings.Builder
+	args := make([]any, 1+2*len(ranges))
+	args[0] = captureID
+	b.WriteByte('(')
+	for i, r := range ranges {
+		if i > 0 {
+			b.WriteString(" OR ")
+		}
+		b.WriteString("packet_id BETWEEN ? AND ?")
+		args[1+2*i] = r.lo
+		args[2+2*i] = r.hi
 	}
 	b.WriteByte(')')
-	args := make([]any, 1+len(packetIDs))
-	args[0] = captureID
-	for i, pid := range packetIDs {
-		args[i+1] = pid
-	}
 	return b.String(), args
 }
+
+// maxRangesPerQuery caps the BETWEEN clauses per query so that even degenerate
+// (fully non-contiguous) ID sets stay within ClickHouse's max_query_size.
+const maxRangesPerQuery = 1000
 
 func (c *Client) fetchComponentBatch(
 	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
 	ctor func() components.ComponentFetcher,
 ) (map[uint64][]components.ClickhouseMappedDecoder, error) {
-	proto := ctor()
-	inClause, args := batchArgs(captureID, packetIDs)
-	query := fmt.Sprintf(
-		"SELECT %s FROM %s FINAL WHERE capture_id = ? AND packet_id IN %s ORDER BY %s ASC",
-		strings.Join(proto.ScanColumns(), ", "),
-		c.tableRef(proto.Table()), inClause, proto.FetchOrderBy(),
-	)
-	rows, err := c.conn.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", proto.Table(), err)
-	}
-	defer rows.Close()
-
 	m := make(map[uint64][]components.ClickhouseMappedDecoder)
-	for rows.Next() {
-		item := ctor()
-		pid, err := item.ScanRow(captureID, rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan %s: %w", proto.Table(), err)
+	ranges := toRanges(packetIDs)
+	for len(ranges) > 0 {
+		chunk := ranges
+		if len(chunk) > maxRangesPerQuery {
+			chunk = ranges[:maxRangesPerQuery]
 		}
-		m[pid] = append(m[pid], item)
+		ranges = ranges[len(chunk):]
+
+		proto := ctor()
+		whereClause, args := rangeArgs(captureID, chunk)
+		query := fmt.Sprintf(
+			"SELECT %s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY %s ASC",
+			strings.Join(proto.ScanColumns(), ", "),
+			c.tableRef(proto.Table()), whereClause, proto.FetchOrderBy(),
+		)
+		rows, err := c.conn.Query(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("fetch %s: %w", proto.Table(), err)
+		}
+		for rows.Next() {
+			item := ctor()
+			pid, err := item.ScanRow(captureID, rows)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan %s: %w", proto.Table(), err)
+			}
+			m[pid] = append(m[pid], item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
-	return m, rows.Err()
+	return m, nil
 }
 
 type fetchResult struct {
