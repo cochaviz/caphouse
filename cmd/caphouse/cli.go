@@ -29,7 +29,6 @@ var longDescription string
 // config holds all resolved flag/env values for a single invocation.
 type config struct {
 	dsn           string
-	database      string
 	batchSize     int
 	flushInterval time.Duration
 	filePath      string
@@ -47,7 +46,6 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	var dsn string
-	var database string
 	var batchSize int
 	var flushInterval time.Duration
 	var readMode bool
@@ -69,7 +67,6 @@ func rootCmd() *cobra.Command {
 			}
 			cfg := config{
 				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
-				database:      firstNonEmpty(database, os.Getenv("CAPHOUSE_DB"), os.Getenv("CAPHOUSE_DATABASE")),
 				sensor:        firstNonEmpty(sensor, os.Getenv("CAPHOUSE_SENSOR")),
 				filePath:      filePath,
 				capture:       capture,
@@ -88,8 +85,7 @@ func rootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dsn, "dsn", "", "ClickHouse DSN, e.g. clickhouse://user:pass@host:9000/db (or CAPHOUSE_DSN)")
-	cmd.Flags().StringVar(&database, "db", "", "ClickHouse database; falls back to the database in the DSN (or CAPHOUSE_DB, CAPHOUSE_DATABASE)")
+	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "ClickHouse DSN, e.g. clickhouse://user:pass@host:9000/db (or CAPHOUSE_DSN)")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "packets per ClickHouse batch insert")
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "maximum time between batch flushes")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging to stderr")
@@ -97,7 +93,7 @@ func rootCmd() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "ingest PCAP from file or stdin into ClickHouse (default mode)")
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
-	cmd.Flags().StringVar(&filePath, "file", "-", "input/output file path; - for stdin/stdout")
+	cmd.Flags().StringVarP(&filePath, "file", "f", "-", "input/output file path; - for stdin/stdout")
 	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture, required in read mode (or CAPHOUSE_SENSOR)")
 
@@ -127,12 +123,17 @@ func rootCmd() *cobra.Command {
 }
 
 func runRead(cmd *cobra.Command, cfg config) error {
-	if cfg.sensor == "" {
-		return errors.New("sensor is required (flag --sensor or env CAPHOUSE_SENSOR)")
-	}
-
 	ctx := context.Background()
 	logger := newLogger(cfg.debug, cfg.silent)
+
+	if cfg.sensor == "" {
+		if h, err := os.Hostname(); err == nil && h != "" {
+			logger.Warn("--sensor not set, falling back to hostname", "sensor", h)
+			cfg.sensor = h
+		} else {
+			return errors.New("sensor is required (flag --sensor or env CAPHOUSE_SENSOR)")
+		}
+	}
 
 	client, err := newClient(ctx, cfg, logger)
 	if err != nil {

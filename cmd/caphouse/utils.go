@@ -181,9 +181,8 @@ func parseCaptureID(input string, allowNew bool) (uuid.UUID, bool, error) {
 // newClient constructs a caphouse.Client from a CLI config.
 func newClient(ctx context.Context, cfg config, logger *slog.Logger) (*caphouse.Client, error) {
 	return caphouse.New(ctx, caphouse.Config{
-		DSN:           cfg.dsn,
-		Database:      cfg.database,
-		BatchSize:     cfg.batchSize,
+		DSN:       cfg.dsn,
+		BatchSize: cfg.batchSize,
 		FlushInterval: cfg.flushInterval,
 		Debug:         cfg.debug,
 		Logger:        logger,

@@ -29,12 +29,12 @@ Requires Go 1.25+ and a ClickHouse instance reachable over the native protocol
 
 ```sh
 # Ingest a file — creates a new capture and prints its UUID on completion
-caphouse --dsn="clickhouse://user:pass@localhost:9000/default" \
-         --sensor="myhost" --file=capture.pcap
+caphouse -d "clickhouse://user:pass@localhost:9000/default" \
+         --sensor="myhost" -f capture.pcap
 
 # Export a capture back to PCAP
-caphouse -w --dsn="clickhouse://user:pass@localhost:9000/default" \
-            --capture=<uuid> --file=out.pcap
+caphouse -w -d "clickhouse://user:pass@localhost:9000/default" \
+            --capture=<uuid> -f out.pcap
 ```
 
 The schema is created automatically on the first read-mode invocation.
@@ -50,35 +50,37 @@ The schema is created automatically on the first read-mode invocation.
 
 ### Flags
 
-| Flag | Env var | Default | Description |
-|------|---------|---------|-------------|
-| `--dsn` | `CAPHOUSE_DSN` | — | ClickHouse connection string, e.g. `clickhouse://user:pass@host:9000/db`. Required. |
-| `--db` | `CAPHOUSE_DB`, `CAPHOUSE_DATABASE` | from DSN | ClickHouse database. Falls back to the database in the DSN, then `default`. |
-| `--sensor` | `CAPHOUSE_SENSOR` | — | Sensor name attached to the capture. Required in read mode. |
-| `--capture` | — | new | In read mode: UUID of an existing capture to append to, or `new` (default) to create one. In write mode: UUID of the capture to export. Required in write mode. |
-| `--file` | — | `-` | File path for input (read) or output (write). `-` means stdin / stdout. |
-| `--batch-size` | — | 1000 | Number of packets per ClickHouse batch insert. |
-| `--flush-interval` | — | 1s | Maximum time between batch flushes. |
-| `--debug` | — | false | Enable verbose ClickHouse driver logging to stderr. |
-| `--silent` | `-s` | false | Suppress warnings and progress output. |
+| Flag | Short | Env var | Default | Description |
+|------|-------|---------|---------|-------------|
+| `--dsn` | `-d` | `CAPHOUSE_DSN` | — | ClickHouse connection string, e.g. `clickhouse://user:pass@host:9000/db`. Required. |
+| `--sensor` | | `CAPHOUSE_SENSOR` | hostname | Sensor name attached to the capture. Falls back to the system hostname in read mode. |
+| `--capture` | | — | new | In read mode: UUID of an existing capture to append to, or `new` (default) to create one. In write mode: UUID of the capture to export. Required in write mode. |
+| `--file` | `-f` | — | `-` | File path for input (read) or output (write). `-` means stdin / stdout. |
+| `--batch-size` | | — | 1000 | Number of packets per ClickHouse batch insert. |
+| `--flush-interval` | | — | 1s | Maximum time between batch flushes. |
+| `--debug` | | — | false | Enable verbose ClickHouse driver logging to stderr. |
+| `--silent` | `-s` | — | false | Suppress warnings and progress output. |
 
 ### Examples
 
 ```sh
-# Ingest from a file (new capture)
-caphouse --dsn="..." --sensor="myhost" --file=capture.pcap
+# Ingest from a file (new capture; sensor defaults to hostname)
+caphouse -d "..." -f capture.pcap
+
+# Ingest with an explicit sensor name
+caphouse -d "..." --sensor="myhost" -f capture.pcap
 
 # Append packets to an existing capture
-caphouse --dsn="..." --sensor="myhost" --file=more.pcap --capture=<uuid>
+caphouse -d "..." -f more.pcap --capture=<uuid>
 
 # Pipe from tcpdump
-tcpdump -i eth0 -w - | caphouse --dsn="..." --sensor="myhost"
+tcpdump -i eth0 -w - | caphouse -d "..."
 
 # Export to a file
-caphouse -w --dsn="..." --capture=<uuid> --file=out.pcap
+caphouse -w -d "..." --capture=<uuid> -f out.pcap
 
 # Stream into tcpreplay
-caphouse -w --dsn="..." --capture=<uuid> | tcpreplay --intf1=eth0 -
+caphouse -w -d "..." --capture=<uuid> | tcpreplay --intf1=eth0 -
 ```
 
 ## Continuous capture with bounded disk usage
