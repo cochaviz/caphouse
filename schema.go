@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS %s
   orig_len    UInt32          CODEC(Delta,       LZ4),
   components  UInt128,
   tail_offset UInt16          CODEC(Delta,       LZ4),
-  frame_raw   String          CODEC(ZSTD),
+  frame_raw   String          CODEC(ZSTD(3)),
   frame_hash  FixedString(32) CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree

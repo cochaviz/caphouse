@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   codec_version UInt16,
 
-  l2_len    UInt16,
+  l2_len     UInt16,
   l2_hdr_raw String CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree
