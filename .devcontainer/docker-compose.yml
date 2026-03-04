@@ -1,0 +1,34 @@
+services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        volumes:
+            - ..:/workspace:cached
+        command: sleep infinity
+        environment:
+            CAPHOUSE_DSN: "clickhouse://default:@clickhouse:9000/default"
+        depends_on:
+            clickhouse:
+                condition: service_healthy
+
+    clickhouse:
+        image: clickhouse/clickhouse-server
+        ports:
+            - "8123:8123"
+            - "9000:9000"
+        environment:
+            CLICKHOUSE_DB: default
+            CLICKHOUSE_USER: default
+            CLICKHOUSE_PASSWORD: ""
+            CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        healthcheck:
+            test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+            start_period: 10s
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144

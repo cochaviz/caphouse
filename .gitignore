@@ -1,4 +1,5 @@
 testresults/
+build/
 man/
 completions/
 *.pcap

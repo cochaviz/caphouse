@@ -1,4 +1,8 @@
+ifeq ($(shell id -u),0)
 PREFIX  ?= /usr/local
+else
+PREFIX  ?= $(HOME)/.local
+endif
 BINDIR  := $(PREFIX)/bin
 MANDIR  := $(PREFIX)/share/man/man1
 ZSHDIR  := $(PREFIX)/share/zsh/site-functions
@@ -13,26 +17,28 @@ endif
 
 BIN     := caphouse
 MONITOR := caphouse-monitor
+BUILDDIR := build
 
 .PHONY: all build man completions install uninstall clean
 
 all: build man completions
 
 build:
-	go build -o $(BIN) ./cmd/caphouse
+	mkdir -p $(BUILDDIR)
+	go build -o $(BUILDDIR)/$(BIN) ./cmd/caphouse
 
 man: build
-	./$(BIN) gen-man man/man1
+	./$(BUILDDIR)/$(BIN) gen-man man/man1
 
 completions: build
 	mkdir -p completions
-	./$(BIN) completion bash > completions/$(BIN).bash
-	./$(BIN) completion zsh  > completions/_$(BIN)
-	./$(BIN) completion fish > completions/$(BIN).fish
+	./$(BUILDDIR)/$(BIN) completion bash > completions/$(BIN).bash
+	./$(BUILDDIR)/$(BIN) completion zsh  > completions/_$(BIN)
+	./$(BUILDDIR)/$(BIN) completion fish > completions/$(BIN).fish
 
 install: build man completions
 	install -d $(DESTDIR)$(BINDIR)
-	install -m755 $(BIN) $(DESTDIR)$(BINDIR)/$(BIN)
+	install -m755 $(BUILDDIR)/$(BIN) $(DESTDIR)$(BINDIR)/$(BIN)
 	install -m755 scripts/$(MONITOR) $(DESTDIR)$(BINDIR)/$(MONITOR)
 	install -d $(DESTDIR)$(MANDIR)
 	install -m644 man/man1/*.1 $(DESTDIR)$(MANDIR)/
@@ -52,5 +58,4 @@ uninstall:
 	rm -f $(DESTDIR)$(FISHDIR)/$(BIN).fish
 
 clean:
-	rm -f $(BIN)
-	rm -rf man completions
+	rm -rf $(BUILDDIR) man completions

@@ -1,0 +1,31 @@
+{
+    "name": "caphouse",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "remoteUser": "vscode",
+
+    "features": {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {
+            "moby": false
+        },
+        "ghcr.io/devcontainers/features/node:1": {},
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions": ["golang.go"],
+            "settings": {
+                "go.toolsManagement.autoUpdate": true,
+                "go.testTimeout": "120s"
+            }
+        }
+    },
+
+    "postCreateCommand": "go install golang.org/x/tools/gopls@latest && go mod download",
+
+    "remoteEnv": {
+        "GOPATH": "/go"
+    }
+}
