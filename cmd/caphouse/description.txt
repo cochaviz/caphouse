@@ -4,7 +4,8 @@ Instead of writing raw frames to disk, it parses each packet into its protocol
 layers and stores each layer in its own ClickHouse table. This makes packet data
 queryable at the column level while still allowing lossless PCAP reconstruction.
 
-Supported protocols include Ethernet, IPv4, TCP, and UDP.
+Supported protocol layers: Ethernet, dot1q (VLAN), Linux SLL, IPv4 (with
+options), IPv6 (with extension headers), TCP, and UDP.
 
 Modes:
   -r (default)  Read a PCAP file or stream and ingest it into ClickHouse.

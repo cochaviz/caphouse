@@ -4,9 +4,12 @@ caphouse stores and exports classic PCAP files in ClickHouse.
 
 Instead of writing raw frames to disk, it parses each packet into its protocol
 layers and stores each layer in its own ClickHouse table. This makes packet data
-queryable at the column level — filter by destination IP, protocol, or VLAN tag
-without ever touching raw frame bytes — while still being able to reconstruct
-the original PCAP losslessly on demand.
+queryable at the column level — filter by destination IP, port, protocol, or
+VLAN tag without ever touching raw frame bytes — while still being able to
+reconstruct the original PCAP losslessly on demand.
+
+Supported protocol layers: Ethernet, dot1q (VLAN), Linux SLL, IPv4, IPv6, TCP,
+and UDP.
 
 > **Status:** experimental
 
@@ -60,6 +63,7 @@ The schema is created automatically on the first read-mode invocation.
 | `--flush-interval` | | — | 1s | Maximum time between batch flushes. |
 | `--debug` | | — | false | Enable verbose ClickHouse driver logging to stderr. |
 | `--silent` | `-s` | — | false | Suppress warnings and progress output. |
+| `--version` | `-v` | — | — | Print version and exit. |
 
 ### Examples
 
@@ -93,12 +97,13 @@ ingest: each completed file is ingested into ClickHouse and then removed.
 caphouse-monitor -i eth0 -d "clickhouse://user:pass@localhost:9000/default" -s myhost
 ```
 
-By default, tcpdump rotates every 100 MB and keeps at most 10 files on disk
-(~1 GB ring buffer). Override with `-C SIZE` and `-W COUNT`:
+By default, tcpdump rotates every 60 seconds. Override with `-t SECS`:
 
 ```sh
-caphouse-monitor -i eth0 -d "..." -s myhost -C 50 -W 20  # 50 MB files, up to 20 (~1 GB)
+caphouse-monitor -i eth0 -d "..." -s myhost -t 300  # rotate every 5 minutes
 ```
+
+The capture directory defaults to `/var/capture`. Override with `-D DIR`.
 
 DSN and sensor can also be provided via `CAPHOUSE_DSN` and `CAPHOUSE_SENSOR`.
 
@@ -108,7 +113,8 @@ up; if it ultimately fails, the file is left on disk for the next rotation cycle
 to attempt again.
 
 `caphouse-monitor` is installed alongside `caphouse` by `make install`. It uses
-`inotifywait` on Linux and `fswatch` on macOS to detect completed rotation files.
+`inotifywait` on Linux and `lsof` polling on macOS to detect completed rotation
+files.
 
 ## Storage model
 
@@ -129,6 +135,9 @@ pcap_ipv4_options  │ L3 — one row per packet
 pcap_ipv6          │
 pcap_ipv6_ext      │    (ipv6_ext: one row per extension header)
 
+pcap_tcp           │
+pcap_udp           │ L4 — one row per packet
+
 pcap_raw_tail      payload bytes from tail_offset to end of frame
 ```
 
@@ -138,8 +147,9 @@ export. No packet is ever silently dropped.
 
 ### Why this layout?
 
-- **Narrow queries.** Scanning destination IPs touches only `pcap_ipv4`; it
-  never reads raw frame bytes.
+- **Narrow queries.** Scanning destination IPs touches only `pcap_ipv4`;
+  filtering by port touches only `pcap_tcp` or `pcap_udp`. Neither ever reads
+  raw frame bytes.
 - **Columnar compression.** Protocol fields (IPs, ports, TTLs, VLAN IDs) repeat
   and compress well when stored together.
 - **Partial reconstruction.** Payload bytes live in `pcap_raw_tail`, separate
@@ -156,9 +166,11 @@ Sequential and monotonic columns carry explicit codecs; low-cardinality fields u
 | `incl_len`, `orig_len` | packets | `CODEC(Delta, LZ4)` — lengths cluster tightly |
 | `tail_offset` | packets, raw\_tail | `CODEC(Delta, LZ4)` |
 | `ipv4_total_len`, `ipv6_payload_len` | ipv4, ipv6 | `CODEC(Delta, LZ4)` |
+| `seq`, `ack` | tcp | `CODEC(Delta, LZ4)` — sequence numbers increment monotonically in most flows |
 | MAC addresses | ethernet | `FixedString(6)` — raw 6 bytes instead of a 17-char formatted string |
 | `frame_raw` | packets | `CODEC(ZSTD(3))` — higher ZSTD level for the raw fallback frame blob |
 | `bytes` | raw\_tail | `CODEC(ZSTD(3))` — same for the payload blob |
+| `options_raw` | tcp | `CODEC(ZSTD(3))` — TCP options blob |
 
 ### Deduplication
 
