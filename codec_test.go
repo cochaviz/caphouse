@@ -300,7 +300,7 @@ func TestCodecRawLinkType(t *testing.T) {
 	}
 }
 
-func TestCodecIPv4UDPStaysRawTail(t *testing.T) {
+func TestCodecIPv4UDP(t *testing.T) {
 	payload := bytes.Repeat([]byte{0x42}, 32)
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
@@ -346,23 +346,33 @@ func TestCodecIPv4UDPStaysRawTail(t *testing.T) {
 	if hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
 		t.Fatalf("did not expect ipv4 options component")
 	}
+	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
+		t.Fatalf("expected udp component")
+	}
 	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
 		t.Fatalf("expected raw tail component")
 	}
 
-	if encoded.Nucleus.TailOffset != 14+20 {
-		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+20)
+	if encoded.Nucleus.TailOffset != 14+20+8 {
+		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+20+8)
 	}
 	rawTail := findRawTailComponent(encoded.Components)
 	if rawTail == nil {
 		t.Fatalf("raw tail missing")
 	}
 	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
-		t.Fatalf("raw tail does not match udp payload")
+		t.Fatalf("raw tail mismatch")
+	}
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
 	}
 }
 
-func TestCodecIPv6UDPStaysRawTail(t *testing.T) {
+func TestCodecIPv6UDP(t *testing.T) {
 	payload := bytes.Repeat([]byte{0x55}, 24)
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
@@ -404,23 +414,33 @@ func TestCodecIPv6UDPStaysRawTail(t *testing.T) {
 	if hasComponentKind(encoded.Components, components.ComponentIPv4) || hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
 		t.Fatalf("did not expect ipv4 components")
 	}
+	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
+		t.Fatalf("expected udp component")
+	}
 	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
 		t.Fatalf("expected raw tail component")
 	}
 
-	if encoded.Nucleus.TailOffset != 14+40 {
-		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+40)
+	if encoded.Nucleus.TailOffset != 14+40+8 {
+		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+40+8)
 	}
 	rawTail := findRawTailComponent(encoded.Components)
 	if rawTail == nil {
 		t.Fatalf("raw tail missing")
 	}
 	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
-		t.Fatalf("raw tail does not match udp payload")
+		t.Fatalf("raw tail mismatch")
+	}
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
 	}
 }
 
-func TestCodecIPv4OptionsUDPRawTail(t *testing.T) {
+func TestCodecIPv4OptionsUDP(t *testing.T) {
 	payload := bytes.Repeat([]byte{0x7e}, 20)
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0xde, 0xad, 0xbe, 0xef, 0x00, 0x01},
@@ -462,15 +482,25 @@ func TestCodecIPv4OptionsUDPRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
 		t.Fatalf("expected ipv4 options component")
 	}
-	if encoded.Nucleus.TailOffset != 14+24 {
-		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+24)
+	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
+		t.Fatalf("expected udp component")
+	}
+	if encoded.Nucleus.TailOffset != 14+24+8 {
+		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+24+8)
 	}
 	rawTail := findRawTailComponent(encoded.Components)
 	if rawTail == nil {
 		t.Fatalf("raw tail missing")
 	}
 	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
-		t.Fatalf("raw tail does not match udp payload")
+		t.Fatalf("raw tail mismatch")
+	}
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
 	}
 }
 

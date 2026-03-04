@@ -28,6 +28,8 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	ipv4OptionsTable := c.ipv4OptionsTable()
 	ipv6Table := c.ipv6Table()
 	ipv6ExtTable := c.ipv6ExtTable()
+	tcpTable := c.tcpTable()
+	udpTable := c.udpTable()
 	rawTailTable := c.rawTailTable()
 
 	createCaptures := fmt.Sprintf(`
@@ -93,6 +95,12 @@ ORDER BY (capture_id, packet_id)`, packetsTable)
 	if err := c.conn.Exec(ctx, components.IPv6ExtSchema(ipv6ExtTable)); err != nil {
 		return fmt.Errorf("create ipv6 ext table: %w", err)
 	}
+	if err := c.conn.Exec(ctx, components.TCPSchema(tcpTable)); err != nil {
+		return fmt.Errorf("create tcp table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.UDPSchema(udpTable)); err != nil {
+		return fmt.Errorf("create udp table: %w", err)
+	}
 	if err := c.conn.Exec(ctx, components.RawTailSchema(rawTailTable)); err != nil {
 		return fmt.Errorf("create raw tail table: %w", err)
 	}
@@ -102,6 +110,8 @@ ORDER BY (capture_id, packet_id)`, packetsTable)
 	}
 	indexes = append(indexes, components.IPv4Indexes(ipv4Table)...)
 	indexes = append(indexes, components.IPv6Indexes(ipv6Table)...)
+	indexes = append(indexes, components.TCPIndexes(tcpTable)...)
+	indexes = append(indexes, components.UDPIndexes(udpTable)...)
 	for _, stmt := range indexes {
 		if err := c.conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("add index: %w", err)
@@ -129,6 +139,8 @@ func (c *Client) ipv4Table() string       { return c.tableRef("pcap_ipv4") }
 func (c *Client) ipv4OptionsTable() string { return c.tableRef("pcap_ipv4_options") }
 func (c *Client) ipv6Table() string       { return c.tableRef("pcap_ipv6") }
 func (c *Client) ipv6ExtTable() string    { return c.tableRef("pcap_ipv6_ext") }
+func (c *Client) tcpTable() string        { return c.tableRef("pcap_tcp") }
+func (c *Client) udpTable() string        { return c.tableRef("pcap_udp") }
 func (c *Client) rawTailTable() string    { return c.tableRef("pcap_raw_tail") }
 
 func quoteIdent(name string) string {

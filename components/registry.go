@@ -15,6 +15,8 @@ var LayerEncoders = map[gopacket.LayerType]LayerEncoder{
 	layers.LayerTypeIPv6Routing:     &IPv6ExtComponent{},
 	layers.LayerTypeIPv6Fragment:    &IPv6ExtComponent{},
 	layers.LayerTypeIPv6Destination: &IPv6ExtComponent{},
+	layers.LayerTypeTCP:             &TCPComponent{},
+	layers.LayerTypeUDP:             &UDPComponent{},
 }
 
 func LayerSupported(layerType gopacket.LayerType) bool {

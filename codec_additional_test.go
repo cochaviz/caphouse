@@ -86,6 +86,9 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 		t.Fatalf("dot1q tag indexes not set")
 	}
 
+	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
+		t.Fatalf("expected udp component")
+	}
 	expectedOffset := sumHeaderLen(encoded.Components)
 	if encoded.Nucleus.TailOffset != uint16(expectedOffset) {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, expectedOffset)
@@ -99,7 +102,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 	}
 }
 
-func TestCodecIPv4TCPStaysRawTail(t *testing.T) {
+func TestCodecIPv4TCP(t *testing.T) {
 	payload := bytes.Repeat([]byte{0x5a}, 32)
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
@@ -134,8 +137,11 @@ func TestCodecIPv4TCPStaysRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv4) {
 		t.Fatalf("expected ipv4 component")
 	}
+	if !hasComponentKind(encoded.Components, components.ComponentTCP) {
+		t.Fatalf("expected tcp component")
+	}
 	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
+		t.Fatalf("expected raw tail component (tcp payload)")
 	}
 	rawTail := findRawTailComponent(encoded.Components)
 	if rawTail == nil {
@@ -143,6 +149,14 @@ func TestCodecIPv4TCPStaysRawTail(t *testing.T) {
 	}
 	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
+	}
+	// Roundtrip
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
 	}
 }
 

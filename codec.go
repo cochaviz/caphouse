@@ -47,7 +47,10 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 		}
 		layerComponents, err := encoder.Encode(layer)
 		if err != nil {
-			return rawFrameFallback(nucleus, frame)
+			// Skip layers that cannot be encoded (e.g. gopacket returns a
+			// zero-content layer for a truncated L4 header). The post-loop
+			// validation catches missing L2/L3 and triggers rawFrameFallback.
+			continue
 		}
 		for _, component := range layerComponents {
 			if component == nil {
@@ -73,6 +76,9 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 	}
 	if (orderCounts[components.OrderL3Options] > 0 || orderCounts[components.OrderL3Ext] > 0) &&
 		orderCounts[components.OrderL3Base] == 0 {
+		return rawFrameFallback(nucleus, frame)
+	}
+	if orderCounts[components.OrderL4Base] > 0 && orderCounts[components.OrderL3Base] == 0 {
 		return rawFrameFallback(nucleus, frame)
 	}
 

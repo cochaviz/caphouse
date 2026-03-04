@@ -30,6 +30,8 @@ const (
 	ComponentRawTail
 	ComponentHash
 	ComponentTruncated
+	ComponentTCP
+	ComponentUDP
 )
 
 const (
@@ -38,6 +40,7 @@ const (
 	OrderL3Base
 	OrderL3Options
 	OrderL3Ext
+	OrderL4Base
 	OrderTail
 )
 
@@ -49,6 +52,8 @@ var KnownComponentKinds = []uint{
 	ComponentIPv4Options,
 	ComponentIPv6,
 	ComponentIPv6Ext,
+	ComponentTCP,
+	ComponentUDP,
 	ComponentRawTail,
 }
 
@@ -194,6 +199,8 @@ var ComponentFactories = map[uint]func() ComponentFetcher{
 	ComponentIPv4Options: func() ComponentFetcher { return &IPv4OptionsComponent{} },
 	ComponentIPv6:        func() ComponentFetcher { return &IPv6Component{} },
 	ComponentIPv6Ext:     func() ComponentFetcher { return &IPv6ExtComponent{} },
+	ComponentTCP:         func() ComponentFetcher { return &TCPComponent{} },
+	ComponentUDP:         func() ComponentFetcher { return &UDPComponent{} },
 	ComponentRawTail:     func() ComponentFetcher { return &RawTailComponent{} },
 }
 
