@@ -1,17 +1,18 @@
 package main
 
 import (
-	_ "embed"
 	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"caphouse"
@@ -25,6 +26,9 @@ import (
 
 //go:embed description.txt
 var longDescription string
+
+//go:embed banner.txt
+var banner string
 
 // config holds all resolved flag/env values for a single invocation.
 type config struct {
@@ -64,6 +68,12 @@ func rootCmd() *cobra.Command {
 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !silent {
+				fmt.Fprintln(
+					cmd.ErrOrStderr(),
+					strings.ReplaceAll(banner, "{{ version }}", resolveVersion()),
+				)
+			}
 			if readMode && writeMode {
 				return errors.New("--read and --write are mutually exclusive")
 			}
