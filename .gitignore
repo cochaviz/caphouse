@@ -1,5 +1,9 @@
+# testing
 testresults/
+testdata/
+*.pcap
+
+# build artifacts
 build/
 man/
 completions/
-*.pcap
