@@ -39,6 +39,7 @@ type config struct {
 	capture       string
 	sensor        string
 	queryExpr     string
+	components    []string
 	debug         bool
 	silent        bool
 }
@@ -59,6 +60,7 @@ func rootCmd() *cobra.Command {
 	var capture string
 	var sensor string
 	var queryExpr string
+	var componentsRaw string
 	var debug bool
 	var silent bool
 
@@ -79,8 +81,8 @@ func rootCmd() *cobra.Command {
 			if readMode && writeMode {
 				return errors.New("--read and --write are mutually exclusive")
 			}
-			if queryExpr != "" && !writeMode {
-				return errors.New("--query requires --write")
+			if componentsRaw != "" && queryExpr == "" {
+				return errors.New("--components requires --query")
 			}
 			cfg := config{
 				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
@@ -90,11 +92,15 @@ func rootCmd() *cobra.Command {
 				batchSize:     batchSize,
 				flushInterval: flushInterval,
 				queryExpr:     queryExpr,
+				components:    splitComponents(componentsRaw),
 				debug:         debug,
 				silent:        silent,
 			}
 			if cfg.dsn == "" {
 				return errors.New("dsn is required (flag --dsn or env CAPHOUSE_DSN)")
+			}
+			if queryExpr != "" && !writeMode {
+				return runExplain(cmd, cfg)
 			}
 			if writeMode {
 				return runWrite(cmd, cfg)
@@ -112,9 +118,10 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "ingest PCAP from file or stdin into ClickHouse (default mode)")
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
 	cmd.Flags().StringVarP(&filePath, "file", "f", "-", "input/output file path; - for stdin/stdout")
-	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
+	cmd.Flags().StringVarP(&capture, "capture", "c", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture, required in read mode (or CAPHOUSE_SENSOR)")
-	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "filter expression (tcpdump-style); outputs filtered packets as PCAP to --file")
+	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "filter expression (tcpdump-style); without --write prints equivalent SQL, with --write exports filtered PCAP")
+	cmd.Flags().StringVarP(&componentsRaw, "components", "C", "", "comma-separated component tables to JOIN (e.g. ipv4,tcp,udp); only valid with --query")
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if err == nil {
@@ -139,6 +146,49 @@ func rootCmd() *cobra.Command {
 	})
 
 	return cmd
+}
+
+// splitComponents splits a comma-separated component string into a slice,
+// trimming spaces and dropping empty entries.
+func splitComponents(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func runExplain(cmd *cobra.Command, cfg config) error {
+	captureID, _, err := parseCaptureID(cfg.capture, false)
+	if err != nil {
+		return fmt.Errorf("--capture is required for --query: %w", err)
+	}
+
+	q, err := caphouse.ParseQuery(cfg.queryExpr)
+	if err != nil {
+		return fmt.Errorf("parse filter: %w", err)
+	}
+
+	ctx := context.Background()
+	logger := newLogger(cfg.debug, cfg.silent)
+	client, err := newClient(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	sql, err := client.GenerateSQL(captureID, q, cfg.components)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), sql)
+	return nil
 }
 
 func runRead(cmd *cobra.Command, cfg config) error {

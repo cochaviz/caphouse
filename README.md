@@ -37,7 +37,7 @@ caphouse -d "clickhouse://user:pass@localhost:9000/default" \
 
 # Export a capture back to PCAP
 caphouse -w -d "clickhouse://user:pass@localhost:9000/default" \
-            --capture=<uuid> -f out.pcap
+            -c <uuid> -f out.pcap
 ```
 
 The schema is created automatically on the first read-mode invocation.
@@ -57,9 +57,10 @@ The schema is created automatically on the first read-mode invocation.
 |------|-------|---------|---------|-------------|
 | `--dsn` | `-d` | `CAPHOUSE_DSN` | — | ClickHouse connection string, e.g. `clickhouse://user:pass@host:9000/db`. Required. |
 | `--sensor` | | `CAPHOUSE_SENSOR` | hostname | Sensor name attached to the capture. Falls back to the system hostname in read mode. |
-| `--capture` | | — | new | In read mode: UUID of an existing capture to append to, or `new` (default) to create one. In write mode: UUID of the capture to export. Required in write mode. |
+| `--capture` | `-c` | — | new | In read mode: UUID of an existing capture to append to, or `new` (default) to create one. In write/query mode: UUID of the capture to operate on. Required in write and explain mode. |
 | `--file` | `-f` | — | `-` | File path for input (read) or output (write). `-` means stdin / stdout. |
-| `--query` | `-q` | — | — | Filter expression (see [Filter syntax](#filter-syntax)); only matching packets are exported. Requires `--write`. |
+| `--query` | `-q` | — | — | Filter expression (see [Filter syntax](#filter-syntax)). Without `--write`: prints the equivalent ClickHouse SQL (see [SQL explain mode](#sql-explain-mode)). With `--write`: exports only matching packets as PCAP. |
+| `--components` | `-C` | — | — | Comma-separated protocol tables to LEFT JOIN into the SQL output (e.g. `ipv4,tcp`). Only valid with `--query` without `--write`. |
 | `--batch-size` | | — | 1000 | Number of packets per ClickHouse batch insert. |
 | `--flush-interval` | | — | 1s | Maximum time between batch flushes. |
 | `--debug` | | — | false | Enable verbose ClickHouse driver logging to stderr. |
@@ -76,22 +77,31 @@ caphouse -d "..." -f capture.pcap
 caphouse -d "..." --sensor="myhost" -f capture.pcap
 
 # Append packets to an existing capture
-caphouse -d "..." -f more.pcap --capture=<uuid>
+caphouse -d "..." -f more.pcap -c <uuid>
 
 # Pipe from tcpdump
 tcpdump -i eth0 -w - | caphouse -d "..."
 
 # Export to a file
-caphouse -w -d "..." --capture=<uuid> -f out.pcap
+caphouse -w -d "..." -c <uuid> -f out.pcap
 
 # Stream into tcpreplay
-caphouse -w -d "..." --capture=<uuid> | tcpreplay --intf1=eth0 -
+caphouse -w -d "..." -c <uuid> | tcpreplay --intf1=eth0 -
 
 # Export only packets matching a filter
-caphouse -w -d "..." --capture=<uuid> -q "host 10.0.0.1 and port 443" -f filtered.pcap
+caphouse -w -d "..." -c <uuid> -q "host 10.0.0.1 and port 443" -f filtered.pcap
 
 # Pipe filtered packets into tcpdump for live inspection
-caphouse -w -d "..." --capture=<uuid> -q "src host 10.0.0.1" | tcpdump -r -
+caphouse -w -d "..." -c <uuid> -q "src host 10.0.0.1" | tcpdump -r -
+
+# Print the ClickHouse SQL for a filter (no --write)
+caphouse -d "..." -c <uuid> -q "host 10.0.0.1"
+
+# Pipe the SQL directly into clickhouse-client
+caphouse -d "..." -c <uuid> -q "host 10.0.0.1" | clickhouse-client --multiquery
+
+# Include protocol columns via LEFT JOINs
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp | clickhouse-client --multiquery
 ```
 
 ## Filter syntax
@@ -121,6 +131,110 @@ host 192.168.1.0 or host 192.168.1.1
 not port 22
 (src host 10.0.0.1 or src host 10.0.0.2) and dst port 80
 time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z
+```
+
+## SQL explain mode
+
+Running `--query` without `--write` prints the equivalent ClickHouse `SELECT`
+statement with all parameters inlined, ready to pipe into `clickhouse-client`.
+No packets are read or exported — the output is pure SQL.
+
+```sh
+caphouse -d "clickhouse://user:pass@localhost:9000/db" \
+         -c <uuid> -q "src host 10.0.0.1 and port 443" \
+         | clickhouse-client --multiquery
+```
+
+By default the query selects from `pcap_packets` only. Use `--components` /
+`-C` to LEFT JOIN one or more protocol tables and include their columns in the
+result:
+
+```sh
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp \
+         | clickhouse-client --multiquery
+```
+
+Supported component names:
+
+| Name | Table |
+|------|-------|
+| `ethernet` | `pcap_ethernet` |
+| `dot1q` | `pcap_dot1q` |
+| `linuxsll` | `pcap_linuxsll` |
+| `ipv4` | `pcap_ipv4` |
+| `ipv4_options` | `pcap_ipv4_options` |
+| `ipv6` | `pcap_ipv6` |
+| `ipv6_ext` | `pcap_ipv6_ext` |
+| `tcp` | `pcap_tcp` |
+| `udp` | `pcap_udp` |
+| `raw_tail` | `pcap_raw_tail` |
+
+### Generated SQL shape
+
+Without `--components`:
+
+```sql
+SELECT
+    p.*
+FROM `db`.`pcap_packets` AS p FINAL
+WHERE (p.capture_id, p.packet_id) IN (
+    -- filter subquery with all args inlined
+)
+```
+
+With `--components ipv4,tcp`:
+
+```sql
+SELECT
+    p.*,
+    ipv4.* EXCEPT (capture_id, packet_id, codec_version),
+    tcp.* EXCEPT (capture_id, packet_id, codec_version)
+FROM `db`.`pcap_packets` AS p FINAL
+LEFT JOIN `db`.`pcap_ipv4` AS ipv4 FINAL USING (capture_id, packet_id)
+LEFT JOIN `db`.`pcap_tcp`  AS tcp  FINAL USING (capture_id, packet_id)
+WHERE (p.capture_id, p.packet_id) IN (
+    -- filter subquery with all args inlined
+)
+```
+
+### Tips and tricks
+
+**Pretty-print the SQL** using `clickhouse-format` (ships with ClickHouse):
+
+```sh
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp | clickhouse-format
+```
+
+**Run the query directly** by piping into `clickhouse-client`:
+
+```sh
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp \
+  | clickhouse-client --multiquery
+```
+
+**Combine both** — format first, then execute:
+
+```sh
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp \
+  | clickhouse-format \
+  | clickhouse-client --multiquery
+```
+
+**Export as CSV** using `clickhouse-client`'s `--format` flag:
+
+```sh
+caphouse -d "..." -c <uuid> -q "port 443" -C ipv4,tcp \
+  | clickhouse-client --multiquery --format CSVWithNames > packets.csv
+```
+
+Other useful formats: `CSV` (no header), `TSV`, `JSONEachRow`, `Parquet`.
+
+**Inspect or edit before running** by saving to a file:
+
+```sh
+caphouse -d "..." -c <uuid> -q "host 10.0.0.1" > query.sql
+# review / tweak query.sql, then:
+clickhouse-client --multiquery < query.sql
 ```
 
 ## Continuous capture with bounded disk usage

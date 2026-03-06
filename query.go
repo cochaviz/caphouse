@@ -102,6 +102,107 @@ func (c *Client) ExportCaptureFiltered(ctx context.Context, captureID uuid.UUID,
 	return pr, int64(len(refs)), nil
 }
 
+// formatArg formats a single query argument as an inline SQL literal.
+func formatArg(v any) string {
+	switch val := v.(type) {
+	case string:
+		return "'" + strings.ReplaceAll(val, "'", "\\'") + "'"
+	case uint16:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// inlineArgs replaces each ? placeholder in sql with the corresponding formatted arg.
+func inlineArgs(sql string, args []any) string {
+	var b strings.Builder
+	argIdx := 0
+	for i := 0; i < len(sql); i++ {
+		if sql[i] == '?' && argIdx < len(args) {
+			b.WriteString(formatArg(args[argIdx]))
+			argIdx++
+		} else {
+			b.WriteByte(sql[i])
+		}
+	}
+	return b.String()
+}
+
+// knownComponents maps component flag values to their table name suffixes and aliases.
+var knownComponents = map[string]struct {
+	table string
+	alias string
+}{
+	"ethernet":     {"pcap_ethernet", "ethernet"},
+	"dot1q":        {"pcap_dot1q", "dot1q"},
+	"linuxsll":     {"pcap_linuxsll", "linuxsll"},
+	"ipv4":         {"pcap_ipv4", "ipv4"},
+	"ipv4_options": {"pcap_ipv4_options", "ipv4_options"},
+	"ipv6":         {"pcap_ipv6", "ipv6"},
+	"ipv6_ext":     {"pcap_ipv6_ext", "ipv6_ext"},
+	"tcp":          {"pcap_tcp", "tcp"},
+	"udp":          {"pcap_udp", "udp"},
+	"raw_tail":     {"pcap_raw_tail", "raw_tail"},
+}
+
+// GenerateSQL returns a SELECT statement equivalent to the filter query with
+// all bind parameters inlined. components is a list of protocol table names
+// (e.g. "ipv4", "tcp") whose rows will be LEFT JOINed into the result.
+func (c *Client) GenerateSQL(captureID uuid.UUID, q Query, components []string) (string, error) {
+	sub, args, err := q.root.subquery(c, []uuid.UUID{captureID})
+	if err != nil {
+		return "", err
+	}
+	inlinedSub := inlineArgs(sub, args)
+
+	// Validate component names.
+	for _, comp := range components {
+		if _, ok := knownComponents[comp]; !ok {
+			return "", fmt.Errorf("unknown component %q", comp)
+		}
+	}
+
+	packetsRef := c.tableRef("pcap_packets")
+
+	// Build SELECT list.
+	selectParts := []string{"p.*"}
+	for _, comp := range components {
+		info := knownComponents[comp]
+		selectParts = append(selectParts,
+			fmt.Sprintf("%s.* EXCEPT (capture_id, packet_id, codec_version)", info.alias),
+		)
+	}
+
+	// Build FROM + JOINs.
+	fromClause := fmt.Sprintf("FROM %s AS p FINAL", packetsRef)
+	var joins []string
+	for _, comp := range components {
+		info := knownComponents[comp]
+		tableRef := c.tableRef(info.table)
+		joins = append(joins,
+			fmt.Sprintf("LEFT JOIN %s AS %s FINAL USING (capture_id, packet_id)", tableRef, info.alias),
+		)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SELECT\n    ")
+	sb.WriteString(strings.Join(selectParts, ",\n    "))
+	sb.WriteString("\n")
+	sb.WriteString(fromClause)
+	for _, j := range joins {
+		sb.WriteString("\n")
+		sb.WriteString(j)
+	}
+	sb.WriteString("\nWHERE (p.capture_id, p.packet_id) IN (\n")
+	sb.WriteString(inlinedSub)
+	sb.WriteString("\n)")
+
+	return sb.String(), nil
+}
+
 // queryNode produces a SQL subquery returning (capture_id, packet_id) rows.
 type queryNode interface {
 	subquery(c *Client, captureIDs []uuid.UUID) (sql string, args []any, err error)
