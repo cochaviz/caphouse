@@ -119,8 +119,13 @@ files.
 ## Storage model
 
 Each frame is decoded into its constituent protocol layers. Each layer type has
-its own ClickHouse table, keyed by `(capture_id, packet_id)`. A bitmask column
-in `pcap_packets` records which layer tables hold rows for a given packet.
+its own ClickHouse table. A bitmask column in `pcap_packets` records which layer
+tables hold rows for a given packet.
+
+Sort keys are tuned per table: L2/L3 tables lead with address columns so that
+rows for the same endpoint pair are physically adjacent, which both improves
+compression and allows address-based queries to skip large portions of the table
+without reading raw frames.
 
 ```
 pcap_captures      capture-level metadata (sensor, link type, snaplen, …)
@@ -157,20 +162,33 @@ export. No packet is ever silently dropped.
 
 ### Compression
 
-Sequential and monotonic columns carry explicit codecs; low-cardinality fields use dictionary encoding:
+Codecs and sort keys are chosen per column based on the data's statistical
+properties:
 
-| Column | Tables | Encoding |
-|--------|--------|----------|
-| `packet_id` | all | `CODEC(Delta, LZ4)` — differences are always 1 |
-| `ts` | packets, ipv4, ipv6 | `CODEC(DoubleDelta, LZ4)` — monotonically increasing nanosecond timestamps |
-| `incl_len`, `orig_len` | packets | `CODEC(Delta, LZ4)` — lengths cluster tightly |
-| `tail_offset` | packets, raw\_tail | `CODEC(Delta, LZ4)` |
-| `ipv4_total_len`, `ipv6_payload_len` | ipv4, ipv6 | `CODEC(Delta, LZ4)` |
-| `seq`, `ack` | tcp | `CODEC(Delta, LZ4)` — sequence numbers increment monotonically in most flows |
-| MAC addresses | ethernet | `FixedString(6)` — raw 6 bytes instead of a 17-char formatted string |
-| `frame_raw` | packets | `CODEC(ZSTD(3))` — higher ZSTD level for the raw fallback frame blob |
-| `bytes` | raw\_tail | `CODEC(ZSTD(3))` — same for the payload blob |
-| `options_raw` | tcp | `CODEC(ZSTD(3))` — TCP options blob |
+| Column | Table(s) | Codec | Notes |
+|--------|----------|-------|-------|
+| `packet_id` | ethernet, ipv4, ipv6 | `DoubleDelta, LZ4` | Monotonically increasing within each address-group; delta-of-deltas approaches zero |
+| `packet_id` | all others | `Delta, LZ4` | Sorted by `(capture_id, packet_id)` so differences are always 1 |
+| `ts` | packets | `ZSTD(9)` | Stored as nanosecond offset from capture start; not in sort key so delta codecs don't help |
+| `incl_len` | packets | `Delta, LZ4` | Lengths cluster tightly within a capture |
+| `trunc_extra` | packets | `ZSTD(9)` | `orig_len − incl_len`; zero for non-truncated packets (~100% of rows) |
+| `ipv4_total_len`, `ipv6_payload_len` | ipv4, ipv6 | `Delta, LZ4` | Packet sizes repeat heavily within a flow |
+| `ipv4_flags` | ipv4 | `ZSTD(9)` | Low cardinality but not sorted by flags, so ZSTD beats plain LZ4 |
+| `seq`, `ack` | tcp | `Delta, LZ4` | Sequence numbers increment monotonically in most flows |
+| MAC addresses | ethernet | `FixedString(6)` | Raw 6 bytes; sort key groups same-pair rows together |
+| `frame_raw` | packets | `ZSTD(3)` | Raw fallback frame blob |
+| `bytes` | raw\_tail | `ZSTD(3)` | Payload blob |
+| `options_raw` | tcp | `ZSTD(3)` | TCP options blob |
+
+**Sort keys by table:**
+
+| Table | `ORDER BY` |
+|-------|-----------|
+| `pcap_packets` | `(capture_id, packet_id)` |
+| `pcap_ethernet` | `(dst_mac, src_mac, capture_id, packet_id)` |
+| `pcap_ipv4` | `(dst_ip_v4, src_ip_v4, capture_id, packet_id)` |
+| `pcap_ipv6` | `(dst_ip_v6, src_ip_v6, capture_id, packet_id)` |
+| all others | `(capture_id, packet_id)` |
 
 ### Deduplication
 
