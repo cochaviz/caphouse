@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/google/uuid"
 )
 
 const (
@@ -25,6 +26,12 @@ type Client struct {
 	mu        sync.Mutex
 	batch     []CodecPacket
 	lastFlush time.Time
+
+	// captureStarts maps capture_id → capture CreatedAt so that insertBatch
+	// can store ts as a nanosecond offset from capture start rather than an
+	// absolute timestamp.
+	capturesMu   sync.RWMutex
+	captureStarts map[uuid.UUID]time.Time
 }
 
 // New initializes a ClickHouse client.
@@ -87,14 +94,28 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		conn:      conn,
-		cfg:       cfg,
-		log:       logger,
-		lastFlush: time.Now(),
+		conn:          conn,
+		cfg:           cfg,
+		log:           logger,
+		lastFlush:     time.Now(),
+		captureStarts: make(map[uuid.UUID]time.Time),
 	}, nil
 }
 
 // Close closes the underlying connection.
 func (c *Client) Close() error {
 	return c.conn.Close()
+}
+
+func (c *Client) storeCaptureStart(id uuid.UUID, t time.Time) {
+	c.capturesMu.Lock()
+	c.captureStarts[id] = t
+	c.capturesMu.Unlock()
+}
+
+func (c *Client) lookupCaptureStart(id uuid.UUID) (time.Time, bool) {
+	c.capturesMu.RLock()
+	t, ok := c.captureStarts[id]
+	c.capturesMu.RUnlock()
+	return t, ok
 }

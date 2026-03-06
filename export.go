@@ -24,6 +24,7 @@ type captureMetaRow struct {
 	LinkType        uint32
 	TimeResolution  string
 	GlobalHeaderRaw []byte
+	CaptureStart    time.Time
 }
 
 // CountPackets returns the deduplicated number of packets stored for the given capture.
@@ -72,7 +73,7 @@ func (c *Client) ExportCaptureBytes(ctx context.Context, captureID uuid.UUID) ([
 }
 
 func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (captureMetaRow, error) {
-	query := fmt.Sprintf("SELECT endianness, snaplen, linktype, time_res, global_header_raw FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
+	query := fmt.Sprintf("SELECT endianness, snaplen, linktype, time_res, global_header_raw, created_at FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
 
 	var meta captureMetaRow
 	var headerRaw string
@@ -82,6 +83,7 @@ func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (cap
 		&meta.LinkType,
 		&meta.TimeResolution,
 		&headerRaw,
+		&meta.CaptureStart,
 	); err != nil {
 		return captureMetaRow{}, fmt.Errorf("fetch capture meta: %w", err)
 	}
@@ -95,7 +97,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 		return err
 	}
 
-	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY ts ASC, packet_id ASC", c.packetsTable())
+	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY ts ASC, packet_id ASC", c.packetsTable())
 	rows, err := c.conn.Query(ctx, query, captureID)
 	if err != nil {
 		return fmt.Errorf("query packets: %w", err)
@@ -104,10 +106,10 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 
 	type nucleusRow struct {
 		packetID      uint64
-		ts            time.Time
-		incl, orig    uint32
+		tsOffsetNs    uint64
+		incl          uint32
+		truncExtra    uint32
 		componentMask *big.Int
-		tailOffset    uint16
 		frameRaw      string
 		frameHash     string
 	}
@@ -131,14 +133,14 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 		}
 
 		for _, row := range batch {
+			ts := meta.CaptureStart.Add(time.Duration(row.tsOffsetNs))
 			nucleus := components.PacketNucleus{
 				CaptureID:  captureID,
 				PacketID:   row.packetID,
-				Timestamp:  row.ts,
+				Timestamp:  ts,
 				InclLen:    row.incl,
-				OrigLen:    row.orig,
+				OrigLen:    row.incl + row.truncExtra,
 				Components: row.componentMask,
-				TailOffset: row.tailOffset,
 				FrameRaw:   []byte(row.frameRaw),
 				FrameHash:  []byte(row.frameHash),
 			}
@@ -151,7 +153,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 				c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
 				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
 			}
-			if err := writePacketRecord(buf, order, row.ts, row.incl, row.orig, frame); err != nil {
+			if err := writePacketRecord(buf, order, ts, row.incl, row.incl+row.truncExtra, frame); err != nil {
 				return err
 			}
 			if packetsWritten != nil {
@@ -167,7 +169,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 		componentMask := new(big.Int)
 		var row nucleusRow
 		row.componentMask = componentMask
-		if err := rows.Scan(&row.packetID, &row.ts, &row.incl, &row.orig, componentMask, &row.tailOffset, &row.frameRaw, &row.frameHash); err != nil {
+		if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
 			return fmt.Errorf("scan packet: %w", err)
 		}
 		batch = append(batch, row)
@@ -352,7 +354,6 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 		"packet_id", packetID,
 		"incl_len", nucleus.InclLen,
 		"orig_len", nucleus.OrigLen,
-		"tail_offset", nucleus.TailOffset,
 		"frame_raw_len", len(nucleus.FrameRaw),
 		"frame_hash_len", len(nucleus.FrameHash),
 		"component_count", len(comps),

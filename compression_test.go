@@ -24,10 +24,25 @@ import (
 
 var compressionClient *Client
 
-// compressionCSV and parseCSV receive one row per PCAP file.
-// They are opened in TestMain and flushed/closed before os.Exit.
+// compressionCSV, tableCSV, and parseCSV receive one row per PCAP file (or
+// per file+table for tableCSV). They are opened in TestMain and
+// flushed/closed before os.Exit.
 var compressionCSV *csv.Writer
+var tableCSV *csv.Writer
 var parseCSV *csv.Writer
+
+// tables is the ordered list of caphouse schema tables.
+var tables = []string{
+	"pcap_captures", "pcap_packets", "pcap_ethernet", "pcap_dot1q",
+	"pcap_linuxsll", "pcap_ipv4", "pcap_ipv4_options", "pcap_ipv6",
+	"pcap_ipv6_ext", "pcap_raw_tail",
+}
+
+// tableBytes holds the raw system.parts byte counts for one table.
+type tableBytes struct {
+	compressed   uint64
+	uncompressed uint64
+}
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
@@ -85,6 +100,19 @@ func TestMain(m *testing.M) {
 		"ch_vs_file_ratio", "internal_ratio", "vs_ref_ratio",
 	})
 
+	tFile, err := os.Create("testresults/compression_by_table.csv")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create compression_by_table.csv: %v\n", err)
+		os.Exit(1)
+	}
+	tableCSV = csv.NewWriter(tFile)
+	_ = tableCSV.Write([]string{
+		"file", "table",
+		"logical_bytes", "compressed_bytes",
+		"compression_ratio",
+		"pct_of_total_logical", "pct_of_total_compressed",
+	})
+
 	pFile, err := os.Create("testresults/parse_ratio.csv")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create parse_ratio.csv: %v\n", err)
@@ -100,6 +128,8 @@ func TestMain(m *testing.M) {
 
 	compressionCSV.Flush()
 	_ = cFile.Close()
+	tableCSV.Flush()
+	_ = tFile.Close()
 	parseCSV.Flush()
 	_ = pFile.Close()
 	_ = compressionClient.Close()
@@ -108,15 +138,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// storageSnapshot forces a merge and returns the total compressed and
-// uncompressed byte counts for the caphouse_compression database.
-func storageSnapshot(t *testing.T, ctx context.Context) (compressed, uncompressed uint64) {
+// storageSnapshot forces a merge and returns per-table byte counts alongside
+// the aggregate compressed/uncompressed totals for the caphouse_compression
+// database.
+func storageSnapshot(t *testing.T, ctx context.Context) (byTable map[string]tableBytes, compressed, uncompressed uint64) {
 	t.Helper()
-	tables := []string{
-		"pcap_captures", "pcap_packets", "pcap_ethernet", "pcap_dot1q",
-		"pcap_linuxsll", "pcap_ipv4", "pcap_ipv4_options", "pcap_ipv6",
-		"pcap_ipv6_ext", "pcap_raw_tail",
-	}
 	for _, tbl := range tables {
 		if err := compressionClient.conn.Exec(ctx,
 			fmt.Sprintf("OPTIMIZE TABLE `caphouse_compression`.`%s` FINAL", tbl),
@@ -125,18 +151,26 @@ func storageSnapshot(t *testing.T, ctx context.Context) (compressed, uncompresse
 		}
 	}
 	rows, err := compressionClient.conn.Query(ctx, `
-		SELECT ifNull(sum(data_compressed_bytes),  0),
+		SELECT table,
+		       ifNull(sum(data_compressed_bytes),  0),
 		       ifNull(sum(data_uncompressed_bytes), 0)
 		FROM   system.parts
-		WHERE  database = 'caphouse_compression' AND active = 1`)
+		WHERE  database = 'caphouse_compression' AND active = 1
+		GROUP BY table`)
 	if err != nil {
 		t.Fatalf("query system.parts: %v", err)
 	}
 	defer rows.Close()
-	if rows.Next() {
-		if err := rows.Scan(&compressed, &uncompressed); err != nil {
+	byTable = make(map[string]tableBytes)
+	for rows.Next() {
+		var tbl string
+		var c, u uint64
+		if err := rows.Scan(&tbl, &c, &u); err != nil {
 			t.Fatalf("scan system.parts: %v", err)
 		}
+		byTable[tbl] = tableBytes{compressed: c, uncompressed: u}
+		compressed += c
+		uncompressed += u
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate system.parts: %v", err)
@@ -241,9 +275,9 @@ func TestCompressionRatio(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 
-			beforeC, beforeU := storageSnapshot(t, ctx)
+			beforeByTable, beforeC, beforeU := storageSnapshot(t, ctx)
 			ingestPCAP(t, ctx, pcapData)
-			afterC, afterU := storageSnapshot(t, ctx)
+			afterByTable, afterC, afterU := storageSnapshot(t, ctx)
 
 			deltaC := afterC - beforeC
 			deltaU := afterU - beforeU
@@ -260,6 +294,31 @@ func TestCompressionRatio(t *testing.T) {
 			t.Logf("ClickHouse compressed size: %s  (%.2fx file)", fmtBytes(deltaC), chVsFile)
 			t.Logf("Internal compress ratio:    %.2fx  (logical → disk)", internal)
 			t.Logf("vs %s:              %.2fx", refMethod, vsRef)
+
+			t.Logf("%-22s  %10s  %10s  %8s  %8s  %8s",
+				"Table", "Logical", "Compressed", "Ratio", "%Logical", "%Compr")
+			for _, tbl := range tables {
+				before := beforeByTable[tbl]
+				after := afterByTable[tbl]
+				tblU := after.uncompressed - before.uncompressed
+				tblC := after.compressed - before.compressed
+				if tblU == 0 && tblC == 0 {
+					continue
+				}
+				ratio := float64(tblU) / float64(tblC)
+				pctU := 100 * float64(tblU) / float64(deltaU)
+				pctC := 100 * float64(tblC) / float64(deltaC)
+				t.Logf("  %-20s  %10s  %10s  %7.2fx  %7.1f%%  %7.1f%%",
+					tbl, fmtBytes(tblU), fmtBytes(tblC), ratio, pctU, pctC)
+				_ = tableCSV.Write([]string{
+					filepath.Base(path), tbl,
+					fmt.Sprintf("%d", tblU),
+					fmt.Sprintf("%d", tblC),
+					fmt.Sprintf("%.4f", ratio),
+					fmt.Sprintf("%.4f", pctU),
+					fmt.Sprintf("%.4f", pctC),
+				})
+			}
 
 			_ = compressionCSV.Write([]string{
 				filepath.Base(path),

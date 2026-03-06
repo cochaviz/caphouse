@@ -2,11 +2,23 @@ package caphouse
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
+	"strings"
 
 	"caphouse/components"
 )
+
+//go:embed captures_schema.sql
+var capturesSchemaSQL string
+
+//go:embed packets_schema.sql
+var packetsSchemaSQL string
+
+func applySchema(sql, table string) string {
+	return strings.ReplaceAll(sql, "{{ table }}", table)
+}
 
 // InitSchema creates the database and tables if they do not exist.
 func (c *Client) InitSchema(ctx context.Context) error {
@@ -32,45 +44,11 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	udpTable := c.udpTable()
 	rawTailTable := c.rawTailTable()
 
-	createCaptures := fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s
-(
-  capture_id UUID,
-  sensor_id LowCardinality(String),
-  created_at DateTime64(3),
-  endianness Enum8('le' = 1, 'be' = 2),
-  snaplen UInt32,
-  linktype UInt32,
-  time_res Enum8('us' = 1),
-  global_header_raw String,
-  codec_version UInt16,
-  codec_profile LowCardinality(String)
-)
-ENGINE = ReplacingMergeTree
-ORDER BY (sensor_id, created_at, capture_id)`, capturesTable)
-
-	if err := c.conn.Exec(ctx, createCaptures); err != nil {
+	if err := c.conn.Exec(ctx, applySchema(capturesSchemaSQL, capturesTable)); err != nil {
 		return fmt.Errorf("create captures table: %w", err)
 	}
 
-	createPackets := fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s
-(
-  capture_id  UUID,
-  packet_id   UInt64          CODEC(Delta,       LZ4),
-  ts          DateTime64(9)   CODEC(DoubleDelta, LZ4),
-  incl_len    UInt32          CODEC(Delta,       LZ4),
-  orig_len    UInt32          CODEC(Delta,       LZ4),
-  components  UInt128,
-  tail_offset UInt16          CODEC(Delta,       LZ4),
-  frame_raw   String          CODEC(ZSTD(3)),
-  frame_hash  FixedString(32) CODEC(ZSTD)
-)
-ENGINE = ReplacingMergeTree
-PARTITION BY toDate(ts)
-ORDER BY (capture_id, packet_id)`, packetsTable)
-
-	if err := c.conn.Exec(ctx, createPackets); err != nil {
+	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, packetsTable)); err != nil {
 		return fmt.Errorf("create packets table: %w", err)
 	}
 

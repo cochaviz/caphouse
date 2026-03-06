@@ -72,6 +72,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, c.capturesTable())
 		return uuid.Nil, fmt.Errorf("insert capture: %w", err)
 	}
 
+	c.storeCaptureStart(meta.CaptureID, meta.CreatedAt)
 	return meta.CaptureID, nil
 }
 
@@ -155,7 +156,7 @@ func (c *Client) insertBatch(ctx context.Context, batch []CodecPacket) error {
 	}
 
 	nucleusInsert := fmt.Sprintf(`INSERT INTO %s
-(capture_id, packet_id, ts, incl_len, orig_len, components, tail_offset, frame_raw, frame_hash)
+(capture_id, packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash)
 VALUES`, c.packetsTable())
 
 	nucleusBatch, err := c.conn.PrepareBatch(ctx, nucleusInsert)
@@ -166,14 +167,21 @@ VALUES`, c.packetsTable())
 	compBatches := map[string]chdriver.Batch{}
 
 	for _, p := range batch {
+		captureStart, ok := c.lookupCaptureStart(p.Nucleus.CaptureID)
+		if !ok {
+			return fmt.Errorf("unknown capture start for %s; call CreateCapture before IngestPacket", p.Nucleus.CaptureID)
+		}
+		var tsOffsetNs uint64
+		if d := p.Nucleus.Timestamp.Sub(captureStart); d > 0 {
+			tsOffsetNs = uint64(d.Nanoseconds())
+		}
 		if err := nucleusBatch.Append(
 			p.Nucleus.CaptureID,
 			p.Nucleus.PacketID,
-			p.Nucleus.Timestamp,
+			tsOffsetNs,
 			p.Nucleus.InclLen,
-			p.Nucleus.OrigLen,
+			p.Nucleus.OrigLen-p.Nucleus.InclLen,
 			p.Nucleus.Components,
-			p.Nucleus.TailOffset,
 			p.Nucleus.FrameRaw,
 			p.Nucleus.FrameHash,
 		); err != nil {
