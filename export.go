@@ -52,7 +52,7 @@ func (c *Client) ExportCaptureWithProgress(ctx context.Context, captureID uuid.U
 
 	pr, pw := io.Pipe()
 	go func() {
-		if err := c.streamCapture(ctx, meta, captureID, pw, packetsWritten); err != nil {
+		if err := c.streamCapture(ctx, meta, captureID, nil, pw, packetsWritten); err != nil {
 			_ = pw.CloseWithError(err)
 			return
 		}
@@ -91,18 +91,17 @@ func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (cap
 	return meta, nil
 }
 
-func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
+// streamCapture writes a PCAP stream to w. If ranges is nil, all packets for
+// the capture are streamed. If non-nil, only packets whose IDs fall within the
+// given ranges are included; ranges must be pre-computed via toRanges.
+func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
 	buf := bufio.NewWriterSize(w, 128*1024)
 	if err := writePCAPHeader(buf, meta); err != nil {
 		return err
 	}
-
-	query := fmt.Sprintf("SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? ORDER BY ts ASC, packet_id ASC", c.packetsTable())
-	rows, err := c.conn.Query(ctx, query, captureID)
-	if err != nil {
-		return fmt.Errorf("query packets: %w", err)
+	if ranges != nil && len(ranges) == 0 {
+		return buf.Flush()
 	}
-	defer rows.Close()
 
 	type nucleusRow struct {
 		packetID      uint64
@@ -116,22 +115,19 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 
 	order := byteOrder(meta.Endianness)
 	batchSize := c.cfg.BatchSize
-	batch := make([]nucleusRow, 0, batchSize)
 
-	flushBatch := func() error {
+	flushBatch := func(batch []nucleusRow) error {
 		if len(batch) == 0 {
 			return nil
 		}
-		packetIDs := make([]uint64, len(batch))
+		ids := make([]uint64, len(batch))
 		for i, row := range batch {
-			packetIDs[i] = row.packetID
+			ids[i] = row.packetID
 		}
-
-		all, err := c.fetchComponentsForBatch(ctx, captureID, packetIDs)
+		all, err := c.fetchComponentsForBatch(ctx, captureID, ids)
 		if err != nil {
 			return err
 		}
-
 		for _, row := range batch {
 			ts := meta.CaptureStart.Add(time.Duration(row.tsOffsetNs))
 			nucleus := components.PacketNucleus{
@@ -160,31 +156,76 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 				packetsWritten.Add(1)
 			}
 		}
-
-		batch = batch[:0]
 		return nil
 	}
 
-	for rows.Next() {
-		componentMask := new(big.Int)
-		var row nucleusRow
-		row.componentMask = componentMask
-		if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
-			return fmt.Errorf("scan packet: %w", err)
+	const selectCols = "SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash"
+
+	if ranges == nil {
+		// Stream all packets for the capture.
+		query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC", selectCols, c.packetsTable())
+		rows, err := c.conn.Query(ctx, query, captureID)
+		if err != nil {
+			return fmt.Errorf("query packets: %w", err)
 		}
-		batch = append(batch, row)
-		if len(batch) >= batchSize {
-			if err := flushBatch(); err != nil {
+		defer rows.Close()
+
+		batch := make([]nucleusRow, 0, batchSize)
+		for rows.Next() {
+			componentMask := new(big.Int)
+			var row nucleusRow
+			row.componentMask = componentMask
+			if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+				return fmt.Errorf("scan packet: %w", err)
+			}
+			batch = append(batch, row)
+			if len(batch) >= batchSize {
+				if err := flushBatch(batch); err != nil {
+					return err
+				}
+				batch = batch[:0]
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate packets: %w", err)
+		}
+		if err := flushBatch(batch); err != nil {
+			return err
+		}
+	} else {
+		// Stream only packets within the given ranges, chunked to keep queries small.
+		for start := 0; start < len(ranges); start += maxRangesPerQuery {
+			end := min(start+maxRangesPerQuery, len(ranges))
+			chunk := ranges[start:end]
+			whereClause, whereArgs := rangeArgs(captureID, chunk)
+			query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY packet_id ASC",
+				selectCols, c.packetsTable(), whereClause)
+			rows, err := c.conn.Query(ctx, query, whereArgs...)
+			if err != nil {
+				return fmt.Errorf("query filtered packets: %w", err)
+			}
+			batch := make([]nucleusRow, 0)
+			for rows.Next() {
+				componentMask := new(big.Int)
+				var row nucleusRow
+				row.componentMask = componentMask
+				if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan filtered packet: %w", err)
+				}
+				batch = append(batch, row)
+			}
+			iterErr := rows.Err()
+			rows.Close()
+			if iterErr != nil {
+				return fmt.Errorf("iterate filtered packets: %w", iterErr)
+			}
+			if err := flushBatch(batch); err != nil {
 				return err
 			}
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate packets: %w", err)
-	}
-	if err := flushBatch(); err != nil {
-		return err
-	}
+
 	if err := buf.Flush(); err != nil {
 		return fmt.Errorf("flush pcap stream: %w", err)
 	}

@@ -59,6 +59,7 @@ The schema is created automatically on the first read-mode invocation.
 | `--sensor` | | `CAPHOUSE_SENSOR` | hostname | Sensor name attached to the capture. Falls back to the system hostname in read mode. |
 | `--capture` | | — | new | In read mode: UUID of an existing capture to append to, or `new` (default) to create one. In write mode: UUID of the capture to export. Required in write mode. |
 | `--file` | `-f` | — | `-` | File path for input (read) or output (write). `-` means stdin / stdout. |
+| `--query` | `-q` | — | — | Filter expression (see [Filter syntax](#filter-syntax)); only matching packets are exported. Requires `--write`. |
 | `--batch-size` | | — | 1000 | Number of packets per ClickHouse batch insert. |
 | `--flush-interval` | | — | 1s | Maximum time between batch flushes. |
 | `--debug` | | — | false | Enable verbose ClickHouse driver logging to stderr. |
@@ -85,6 +86,41 @@ caphouse -w -d "..." --capture=<uuid> -f out.pcap
 
 # Stream into tcpreplay
 caphouse -w -d "..." --capture=<uuid> | tcpreplay --intf1=eth0 -
+
+# Export only packets matching a filter
+caphouse -w -d "..." --capture=<uuid> -q "host 10.0.0.1 and port 443" -f filtered.pcap
+
+# Pipe filtered packets into tcpdump for live inspection
+caphouse -w -d "..." --capture=<uuid> -q "src host 10.0.0.1" | tcpdump -r -
+```
+
+## Filter syntax
+
+The `--query` flag accepts a tcpdump-style filter expression. Filters are evaluated
+against the stored protocol columns — no raw frame bytes are read during matching.
+
+### Primitives
+
+| Expression | Matches |
+|------------|---------|
+| `host <ip>` | src or dst IP (IPv4 or IPv6) |
+| `src host <ip>` | source IP only |
+| `dst host <ip>` | destination IP only |
+| `port <n>` | src or dst TCP or UDP port |
+| `src port <n>` | source port only |
+| `dst port <n>` | destination port only |
+| `time <rfc3339> to <rfc3339>` | packet timestamp within range |
+
+### Combinators
+
+Primitives can be combined with `and`, `or`, `not`, and parentheses:
+
+```
+src host 10.0.0.1 and port 443
+host 192.168.1.0 or host 192.168.1.1
+not port 22
+(src host 10.0.0.1 or src host 10.0.0.2) and dst port 80
+time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z
 ```
 
 ## Continuous capture with bounded disk usage

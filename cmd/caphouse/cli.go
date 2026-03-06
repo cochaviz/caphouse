@@ -38,6 +38,7 @@ type config struct {
 	filePath      string
 	capture       string
 	sensor        string
+	queryExpr     string
 	debug         bool
 	silent        bool
 }
@@ -57,6 +58,7 @@ func rootCmd() *cobra.Command {
 	var filePath string
 	var capture string
 	var sensor string
+	var queryExpr string
 	var debug bool
 	var silent bool
 
@@ -77,6 +79,9 @@ func rootCmd() *cobra.Command {
 			if readMode && writeMode {
 				return errors.New("--read and --write are mutually exclusive")
 			}
+			if queryExpr != "" && !writeMode {
+				return errors.New("--query requires --write")
+			}
 			cfg := config{
 				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
 				sensor:        firstNonEmpty(sensor, os.Getenv("CAPHOUSE_SENSOR")),
@@ -84,6 +89,7 @@ func rootCmd() *cobra.Command {
 				capture:       capture,
 				batchSize:     batchSize,
 				flushInterval: flushInterval,
+				queryExpr:     queryExpr,
 				debug:         debug,
 				silent:        silent,
 			}
@@ -108,6 +114,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&filePath, "file", "f", "-", "input/output file path; - for stdin/stdout")
 	cmd.Flags().StringVar(&capture, "capture", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture, required in read mode (or CAPHOUSE_SENSOR)")
+	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "filter expression (tcpdump-style); outputs filtered packets as PCAP to --file")
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if err == nil {
@@ -217,16 +224,31 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	}
 	defer client.Close()
 
-	totalPackets, err := client.CountPackets(ctx, captureID)
-	if err != nil {
-		logger.Warn("could not count packets", "err", err)
-		totalPackets = -1
-	}
-
 	var p ingestProgress
-	rc, err := client.ExportCaptureWithProgress(ctx, captureID, &p.packets)
-	if err != nil {
-		return err
+	var rc io.ReadCloser
+	var totalPackets int64
+
+	if cfg.queryExpr != "" {
+		f, err := caphouse.ParseQuery(cfg.queryExpr)
+		if err != nil {
+			return fmt.Errorf("parse filter: %w", err)
+		}
+		rc, totalPackets, err = client.ExportCaptureFiltered(ctx, captureID, f, &p.packets)
+		if err != nil {
+			return err
+		}
+		logger.Info("exporting filtered", "capture_id", captureID, "filter", cfg.queryExpr, "matched", totalPackets)
+	} else {
+		totalPackets, err = client.CountPackets(ctx, captureID)
+		if err != nil {
+			logger.Warn("could not count packets", "err", err)
+			totalPackets = -1
+		}
+		rc, err = client.ExportCaptureWithProgress(ctx, captureID, &p.packets)
+		if err != nil {
+			return err
+		}
+		logger.Info("exporting", "capture_id", captureID)
 	}
 	defer rc.Close()
 
@@ -234,7 +256,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	if destLabel == "" || destLabel == "-" {
 		destLabel = "stdout"
 	}
-	logger.Info("exporting", "capture_id", captureID, "dest", destLabel)
+	logger.Info("dest", "path", destLabel)
 
 	out := io.Writer(cmd.OutOrStdout())
 	if cfg.filePath != "" && cfg.filePath != "-" {
