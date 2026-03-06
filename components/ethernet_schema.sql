@@ -12,4 +12,4 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   eth_len  UInt16
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (capture_id, packet_id)
+ORDER BY (dst_mac, src_mac, capture_id, packet_id)
