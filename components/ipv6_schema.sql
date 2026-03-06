@@ -2,8 +2,7 @@
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
   capture_id UUID,
-  packet_id  UInt64        CODEC(Delta,       LZ4),
-  ts         DateTime64(9) CODEC(DoubleDelta, LZ4),
+  packet_id  UInt64 CODEC(DoubleDelta, LZ4),
 
   codec_version UInt16,
 
@@ -21,5 +20,4 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   ipv6_traffic_class UInt8
 )
 ENGINE = ReplacingMergeTree
-PARTITION BY toDate(ts)
-ORDER BY (toDate(ts), protocol, dst_ip_v6, capture_id, packet_id)
+ORDER BY (dst_ip_v6, src_ip_v6, capture_id, packet_id)

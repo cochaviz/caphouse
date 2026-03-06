@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
@@ -21,7 +20,6 @@ var ipv4SchemaSQL string
 type IPv4Component struct {
 	CaptureID uuid.UUID `ch:"capture_id"`
 	PacketID  uint64    `ch:"packet_id"`
-	Timestamp time.Time `ch:"ts"`
 
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -58,7 +56,7 @@ func (c *IPv4Component) ClickhouseColumns() ([]string, error) {
 // ClickhouseValues overrides reflection to convert netip.Addr to strings.
 func (c *IPv4Component) ClickhouseValues() ([]any, error) {
 	return []any{
-		c.CaptureID, c.PacketID, c.Timestamp, c.CodecVersion,
+		c.CaptureID, c.PacketID, c.CodecVersion,
 		c.ParsedOK, shortErr(c.ParseErr), c.Protocol,
 		ipv4String(c.SrcIP4), ipv4String(c.DstIP4),
 		c.IPv4IHL, c.IPv4TOS, c.IPv4TotalLen, c.IPv4ID,
@@ -69,7 +67,6 @@ func (c *IPv4Component) ClickhouseValues() ([]any, error) {
 func (c *IPv4Component) ApplyNucleus(nucleus PacketNucleus) {
 	c.CaptureID = nucleus.CaptureID
 	c.PacketID = nucleus.PacketID
-	c.Timestamp = nucleus.Timestamp
 }
 
 func (c *IPv4Component) Reconstruct(ctx *DecodeContext) error {
@@ -98,7 +95,7 @@ func (c *IPv4Component) Reconstruct(ctx *DecodeContext) error {
 
 func (c *IPv4Component) ScanColumns() []string {
 	return []string{
-		"packet_id", "ts", "parsed_ok", "parse_err", "protocol",
+		"packet_id", "parsed_ok", "parse_err", "protocol",
 		"src_ip_v4", "dst_ip_v4",
 		"ipv4_ihl", "ipv4_tos", "ipv4_total_len", "ipv4_id",
 		"ipv4_flags", "ipv4_frag_offset", "ipv4_ttl", "ipv4_hdr_checksum",
@@ -109,7 +106,7 @@ func (c *IPv4Component) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64
 	var src, dst string
 	c.CaptureID = captureID
 	err := rows.Scan(
-		&c.PacketID, &c.Timestamp, &c.ParsedOK, &c.ParseErr, &c.Protocol,
+		&c.PacketID, &c.ParsedOK, &c.ParseErr, &c.Protocol,
 		&src, &dst,
 		&c.IPv4IHL, &c.IPv4TOS, &c.IPv4TotalLen, &c.IPv4ID,
 		&c.IPv4Flags, &c.IPv4FragOffset, &c.IPv4TTL, &c.IPv4HdrChecksum,
