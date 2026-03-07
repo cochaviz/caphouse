@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - **Query filtering (`-q` / `--query`)** — filter captured data using a simple DSL similar to BPF (e.g. `host 1.1.1.1 and port 53 and time <begin> to <end>`) when retrieving with `-w`
 - **Standalone `-q` usage** — running `caphouse -q <query> --capture` prints the SQL query to stdout, enabling direct piping to `clickhouse-client` for inspection
 - Scripts now bundled in the binary; `go install` works directly (Makefile no longer required for installation)
+- ClickHouse client added to devcontainer
+- Banner added to the manual
 
 ### Compression Improvements
 
@@ -25,9 +27,7 @@ All notable changes to this project will be documented in this file.
 - **TCP/UDP (L4) support** — packet capture now parses and stores TCP and UDP protocol layers in dedicated tables
 - **`--version` flag** — report the installed version
 - Simplified CLI interface
-- Banner added to the manual
-- Devcontainer configuration added, including ClickHouse client
-- User installs now go to `/home/vscode/.local/bin`
+- Devcontainer configuration added; user installs now go to `/home/vscode/.local/bin`
 
 ### Testing
 
