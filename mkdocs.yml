@@ -1,0 +1,48 @@
+site_name: caphouse
+site_description: Store and query PCAP files in ClickHouse — parsed, compressed, and reconstructible on demand.
+site_url: https://cochaviz.github.io/caphouse/
+repo_url: https://github.com/cochaviz/caphouse
+repo_name: cochaviz/caphouse
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.instant
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Filter Syntax: filters.md
+  - Reference:
+      - All Flags: reference.md
+      - Storage & Compression: storage.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: .
