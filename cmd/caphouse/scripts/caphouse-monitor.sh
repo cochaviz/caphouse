@@ -15,7 +15,7 @@ set -eu
 
 IFACE=
 DSN="${CAPHOUSE_DSN:-}"
-SENSOR="${CAPHOUSE_SENSOR:-}"
+SENSOR=
 ROTATE=60
 DIR=/var/capture
 
@@ -29,7 +29,7 @@ completed file into ClickHouse and removing it on success.
 Options:
   -i IFACE     Network interface to capture on (required)
   -d DSN       ClickHouse DSN (default: \$CAPHOUSE_DSN)
-  -s SENSOR    Sensor name (default: \$CAPHOUSE_SENSOR)
+  -s SENSOR    Sensor name (required)
   -t SECS      Rotate after SECS seconds (default: $ROTATE)
   -D DIR       Directory for rotation files (default: $DIR)
   -h           Show this help
@@ -50,13 +50,12 @@ done
 
 [ -n "$IFACE"  ] || { echo "caphouse-monitor: -i IFACE is required" >&2; exit 1; }
 [ -n "$DSN"    ] || { echo "caphouse-monitor: DSN is required (-d or CAPHOUSE_DSN)" >&2; exit 1; }
-[ -n "$SENSOR" ] || { echo "caphouse-monitor: sensor is required (-s or CAPHOUSE_SENSOR)" >&2; exit 1; }
+[ -n "$SENSOR" ] || { echo "caphouse-monitor: sensor is required (-s)" >&2; exit 1; }
 
 mkdir -p "$DIR"
 
-# Export so caphouse picks them up from the environment.
+# Export DSN so caphouse picks it up from the environment.
 export CAPHOUSE_DSN="$DSN"
-export CAPHOUSE_SENSOR="$SENSOR"
 
 # One stable capture ID for the whole monitoring session; all ring files are
 # ingested into this single capture in ClickHouse.
@@ -71,7 +70,7 @@ TCPDUMP_PID=$!
 trap 'kill "$TCPDUMP_PID" 2>/dev/null; wait "$TCPDUMP_PID" 2>/dev/null' INT TERM EXIT
 
 ingest() {
-    caphouse --silent --file="$1" --capture="$CAPTURE_ID" && rm -f "$1"
+    caphouse --silent --sensor="$SENSOR" --file="$1" --capture="$CAPTURE_ID" && rm -f "$1"
 }
 
 # On any exit: stop tcpdump, wait for it to close its current file, then ingest

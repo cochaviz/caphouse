@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +24,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
+
+//go:embed scripts/caphouse-monitor.sh
+var monitorScript []byte
 
 //go:embed description.txt
 var longDescription string
@@ -86,7 +90,7 @@ func rootCmd() *cobra.Command {
 			}
 			cfg := config{
 				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
-				sensor:        firstNonEmpty(sensor, os.Getenv("CAPHOUSE_SENSOR")),
+				sensor:        sensor,
 				filePath:      filePath,
 				capture:       capture,
 				batchSize:     batchSize,
@@ -119,7 +123,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
 	cmd.Flags().StringVarP(&filePath, "file", "f", "-", "input/output file path; - for stdin/stdout")
 	cmd.Flags().StringVarP(&capture, "capture", "c", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
-	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture, required in read mode (or CAPHOUSE_SENSOR)")
+	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture; defaults to system hostname in read mode")
 	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "filter expression (tcpdump-style); without --write prints equivalent SQL, with --write exports filtered PCAP")
 	cmd.Flags().StringVarP(&componentsRaw, "components", "C", "", "comma-separated component tables to JOIN (e.g. ipv4,tcp,udp); only valid with --query")
 
@@ -132,16 +136,44 @@ func rootCmd() *cobra.Command {
 	})
 
 	cmd.AddCommand(&cobra.Command{
-		Use:    "gen-man [directory]",
-		Short:  "Generate man page into directory",
-		Hidden: true,
-		Args:   cobra.ExactArgs(1),
+		Use:   "install-manual [directory] (should be executed as root)",
+		Short: "Generate and install man page",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if err := os.MkdirAll(args[0], 0o755); err != nil {
+			manpath := "/usr/local/share/man/man1"
+
+			if len(args) > 0 && args[0] != "" {
+				manpath = args[0]
+			}
+			if err := os.MkdirAll(path.Clean(manpath), 0o755); err != nil {
 				return err
 			}
 			header := &doc.GenManHeader{Title: "CAPHOUSE", Section: "1"}
-			return doc.GenManTree(cmd, header, args[0])
+			return doc.GenManTree(cmd, header, manpath)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "install-scripts [directory]",
+		Short: "Install companion caphouse scripts (e.g. monitor)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home_dir, _ := os.UserHomeDir()
+			scriptpath := path.Join(home_dir, ".local/bin")
+			if len(args) > 0 && args[0] != "" {
+				scriptpath = args[0]
+			}
+			if err := os.MkdirAll(scriptpath, 0o755); err != nil {
+				return err
+			}
+			monitorFileLocation := filepath.Join(scriptpath, "caphouse-monitor")
+			err := os.WriteFile(monitorFileLocation, monitorScript, os.FileMode(0755))
+
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed caphouse-monitor to %s\n", monitorFileLocation)
+			return nil
 		},
 	})
 
@@ -200,7 +232,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 			logger.Warn("--sensor not set, falling back to hostname", "sensor", h)
 			cfg.sensor = h
 		} else {
-			return errors.New("sensor is required (flag --sensor or env CAPHOUSE_SENSOR)")
+			return errors.New("sensor is required (--sensor)")
 		}
 	}
 
