@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"caphouse/components"
+	"caphouse/streams"
 )
 
 //go:embed captures_schema.sql
@@ -42,7 +43,11 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	ipv6ExtTable := c.ipv6ExtTable()
 	tcpTable := c.tcpTable()
 	udpTable := c.udpTable()
+	dnsTable := c.dnsTable()
+	ntpTable := c.ntpTable()
 	rawTailTable := c.rawTailTable()
+	streamCapturesTable := c.streamCapturesTable()
+	streamHTTPTable := c.streamHTTPTable()
 
 	if err := c.conn.Exec(ctx, applySchema(capturesSchemaSQL, capturesTable)); err != nil {
 		return fmt.Errorf("create captures table: %w", err)
@@ -79,8 +84,20 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	if err := c.conn.Exec(ctx, components.UDPSchema(udpTable)); err != nil {
 		return fmt.Errorf("create udp table: %w", err)
 	}
+	if err := c.conn.Exec(ctx, components.DNSSchema(dnsTable)); err != nil {
+		return fmt.Errorf("create dns table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, components.NTPSchema(ntpTable)); err != nil {
+		return fmt.Errorf("create ntp table: %w", err)
+	}
 	if err := c.conn.Exec(ctx, components.RawTailSchema(rawTailTable)); err != nil {
 		return fmt.Errorf("create raw tail table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, streams.CapturesSchema(streamCapturesTable)); err != nil {
+		return fmt.Errorf("create stream_captures table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, streams.HTTPSchema(streamHTTPTable)); err != nil {
+		return fmt.Errorf("create stream_http table: %w", err)
 	}
 
 	indexes := []string{
@@ -90,6 +107,9 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	indexes = append(indexes, components.IPv6Indexes(ipv6Table)...)
 	indexes = append(indexes, components.TCPIndexes(tcpTable)...)
 	indexes = append(indexes, components.UDPIndexes(udpTable)...)
+	indexes = append(indexes, components.DNSIndexes(dnsTable)...)
+	indexes = append(indexes, streams.CapturesIndexes(streamCapturesTable)...)
+	indexes = append(indexes, streams.HTTPIndexes(streamHTTPTable)...)
 	for _, stmt := range indexes {
 		if err := c.conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("add index: %w", err)
@@ -108,18 +128,23 @@ func (c *Client) tableRef(table string) string {
 	return fmt.Sprintf("%s.%s", quoteIdent(c.cfg.Database), quoteIdent(table))
 }
 
-func (c *Client) capturesTable() string   { return c.tableRef("pcap_captures") }
-func (c *Client) packetsTable() string    { return c.tableRef("pcap_packets") }
-func (c *Client) ethernetTable() string   { return c.tableRef("pcap_ethernet") }
-func (c *Client) dot1qTable() string      { return c.tableRef("pcap_dot1q") }
-func (c *Client) linuxSLLTable() string   { return c.tableRef("pcap_linuxsll") }
-func (c *Client) ipv4Table() string       { return c.tableRef("pcap_ipv4") }
-func (c *Client) ipv4OptionsTable() string { return c.tableRef("pcap_ipv4_options") }
-func (c *Client) ipv6Table() string       { return c.tableRef("pcap_ipv6") }
-func (c *Client) ipv6ExtTable() string    { return c.tableRef("pcap_ipv6_ext") }
-func (c *Client) tcpTable() string        { return c.tableRef("pcap_tcp") }
-func (c *Client) udpTable() string        { return c.tableRef("pcap_udp") }
-func (c *Client) rawTailTable() string    { return c.tableRef("pcap_raw_tail") }
+func (c *Client) capturesTable() string      { return c.tableRef("pcap_captures") }
+func (c *Client) packetsTable() string       { return c.tableRef("pcap_packets") }
+func (c *Client) ethernetTable() string      { return c.tableRef("pcap_ethernet") }
+func (c *Client) dot1qTable() string         { return c.tableRef("pcap_dot1q") }
+func (c *Client) linuxSLLTable() string      { return c.tableRef("pcap_linuxsll") }
+func (c *Client) ipv4Table() string          { return c.tableRef("pcap_ipv4") }
+func (c *Client) ipv4OptionsTable() string   { return c.tableRef("pcap_ipv4_options") }
+func (c *Client) ipv6Table() string          { return c.tableRef("pcap_ipv6") }
+func (c *Client) ipv6ExtTable() string       { return c.tableRef("pcap_ipv6_ext") }
+func (c *Client) tcpTable() string           { return c.tableRef("pcap_tcp") }
+func (c *Client) udpTable() string           { return c.tableRef("pcap_udp") }
+func (c *Client) dnsTable() string           { return c.tableRef("pcap_dns") }
+func (c *Client) ntpTable() string           { return c.tableRef("pcap_ntp") }
+func (c *Client) rawTailTable() string       { return c.tableRef("pcap_raw_tail") }
+func (c *Client) streamCapturesTable() string { return c.tableRef("stream_captures") }
+func (c *Client) streamHTTPTable() string    { return c.tableRef("stream_http") }
+
 
 func quoteIdent(name string) string {
 	return "`" + name + "`"

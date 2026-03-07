@@ -80,6 +80,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, c.capturesTable())
 func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) error {
 	normalizePacket(&p)
 	encoded := EncodePacket(linkType, p)
+	if c.streams != nil {
+		c.streams.Observe(encoded.Nucleus, encoded.Components)
+	}
 
 	c.mu.Lock()
 	c.batch = append(c.batch, encoded)

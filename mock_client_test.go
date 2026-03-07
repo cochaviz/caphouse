@@ -23,6 +23,8 @@ type mockClient struct {
 	ipv6Ext     map[uint64][]*components.IPv6ExtComponent
 	tcp         map[uint64]*components.TCPComponent
 	udp         map[uint64]*components.UDPComponent
+	dns         map[uint64]*components.DNSComponent
+	ntp         map[uint64]*components.NTPComponent
 	rawTail     map[uint64]*components.RawTailComponent
 }
 
@@ -51,6 +53,8 @@ func newMockClient(meta CaptureMeta) *mockClient {
 		ipv6Ext:     map[uint64][]*components.IPv6ExtComponent{},
 		tcp:         map[uint64]*components.TCPComponent{},
 		udp:         map[uint64]*components.UDPComponent{},
+		dns:         map[uint64]*components.DNSComponent{},
+		ntp:         map[uint64]*components.NTPComponent{},
 		rawTail:     map[uint64]*components.RawTailComponent{},
 	}
 }
@@ -79,6 +83,10 @@ func (m *mockClient) IngestPacket(linkType uint32, p Packet) error {
 			m.tcp[p.PacketID] = component
 		case *components.UDPComponent:
 			m.udp[p.PacketID] = component
+		case *components.DNSComponent:
+			m.dns[p.PacketID] = component
+		case *components.NTPComponent:
+			m.ntp[p.PacketID] = component
 		case *components.RawTailComponent:
 			m.rawTail[p.PacketID] = component
 		}
@@ -134,6 +142,12 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 			componentsList = append(componentsList, comp)
 		}
 		if comp := m.udp[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.dns[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.ntp[id]; comp != nil {
 			componentsList = append(componentsList, comp)
 		}
 		if comp := m.rawTail[id]; comp != nil {

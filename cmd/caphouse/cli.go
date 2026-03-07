@@ -46,6 +46,7 @@ type config struct {
 	components    []string
 	debug         bool
 	silent        bool
+	noStreams     bool
 }
 
 func main() {
@@ -67,6 +68,7 @@ func rootCmd() *cobra.Command {
 	var componentsRaw string
 	var debug bool
 	var silent bool
+	var noStreams bool
 
 	cmd := &cobra.Command{
 		Use:     "caphouse",
@@ -99,6 +101,7 @@ func rootCmd() *cobra.Command {
 				components:    splitComponents(componentsRaw),
 				debug:         debug,
 				silent:        silent,
+				noStreams:     noStreams,
 			}
 			if cfg.dsn == "" {
 				return errors.New("dsn is required (flag --dsn or env CAPHOUSE_DSN)")
@@ -118,6 +121,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "maximum time between batch flushes")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging to stderr")
 	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "suppress warnings and progress output")
+	cmd.Flags().BoolVar(&noStreams, "no-streams", false, "disable TCP stream tracking and L7 protocol detection during ingest")
 
 	cmd.Flags().BoolVarP(&readMode, "read", "r", false, "ingest PCAP from file or stdin into ClickHouse (default mode)")
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
@@ -463,6 +467,9 @@ func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader,
 	}
 
 	if err := client.Flush(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	if err := client.FinalizeStreams(ctx); err != nil {
 		return uuid.Nil, err
 	}
 

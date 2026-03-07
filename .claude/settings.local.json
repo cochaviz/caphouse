@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -c user.name=\"Zohar Cochavi\" -c user.email=\"cochavi.zohar@protonmail.com\" commit -m \"$\\(cat <<'EOF'\nSimplify README, defer details to docs site\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nEOF\n\\)\" README.md)",
+      "Read(//root/go/pkg/mod/github.com/**)",
+      "Read(//root/go/pkg/mod/github.com/google/gopacket@v1.1.19/**)"
+    ]
+  }
+}

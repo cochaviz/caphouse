@@ -687,6 +687,417 @@ func buildIPv4Header(options []byte, payloadLen int) []byte {
 	return header
 }
 
+func findDNSComponent(comps []components.ClickhouseMappedDecoder) *components.DNSComponent {
+	for _, comp := range comps {
+		if c, ok := comp.(*components.DNSComponent); ok {
+			return c
+		}
+	}
+	return nil
+}
+
+func findNTPComponent(comps []components.ClickhouseMappedDecoder) *components.NTPComponent {
+	for _, comp := range comps {
+		if c, ok := comp.(*components.NTPComponent); ok {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestDNSEncodeDecode(t *testing.T) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		DstMAC:       net.HardwareAddr{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 10),
+		DstIP:    net.IPv4(8, 8, 8, 8),
+	}
+	udp := &layers.UDP{
+		SrcPort: 12345,
+		DstPort: 53,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
+		t.Fatalf("set udp checksum: %v", err)
+	}
+	dns := &layers.DNS{
+		ID:     0x1234,
+		QR:     false,
+		OpCode: layers.DNSOpCodeQuery,
+		RD:     true,
+		Questions: []layers.DNSQuestion{
+			{Name: []byte("example.com"), Type: layers.DNSTypeA, Class: layers.DNSClassIN},
+			{Name: []byte("www.example.com"), Type: layers.DNSTypeAAAA, Class: layers.DNSClassIN},
+		},
+	}
+
+	frame := serializeLayers(t, eth, ip4, udp, dns)
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  100,
+		Timestamp: time.Unix(1700000200, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
+		t.Fatalf("expected DNS component bit set")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("did not expect raw frame fallback")
+	}
+
+	dnsComp := findDNSComponent(encoded.Components)
+	if dnsComp == nil {
+		t.Fatalf("DNS component missing from list")
+	}
+
+	if dnsComp.TransactionID != 0x1234 {
+		t.Fatalf("transaction_id mismatch: got 0x%x want 0x1234", dnsComp.TransactionID)
+	}
+	if dnsComp.QR != 0 {
+		t.Fatalf("qr mismatch: got %d want 0 (query)", dnsComp.QR)
+	}
+	if dnsComp.Flags&0x02 == 0 {
+		t.Fatalf("RD flag not set in flags byte")
+	}
+	if len(dnsComp.QuestionsName) != 2 {
+		t.Fatalf("questions_name length mismatch: got %d want 2", len(dnsComp.QuestionsName))
+	}
+	if dnsComp.QuestionsName[0] != "example.com" {
+		t.Fatalf("questions_name[0] mismatch: got %q want %q", dnsComp.QuestionsName[0], "example.com")
+	}
+	if dnsComp.QuestionsName[1] != "www.example.com" {
+		t.Fatalf("questions_name[1] mismatch: got %q want %q", dnsComp.QuestionsName[1], "www.example.com")
+	}
+	if dnsComp.QuestionsType[0] != uint16(layers.DNSTypeA) {
+		t.Fatalf("questions_type[0] mismatch")
+	}
+	if dnsComp.QuestionsType[1] != uint16(layers.DNSTypeAAAA) {
+		t.Fatalf("questions_type[1] mismatch")
+	}
+
+	rawTail := findRawTailComponent(encoded.Components)
+	if rawTail != nil && len(rawTail.Bytes) > 0 {
+		t.Fatalf("expected empty raw_tail for DNS packet, got %d bytes", len(rawTail.Bytes))
+	}
+
+	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(reconstructed, frame) {
+		t.Fatalf("reconstructed frame mismatch (len got %d want %d)", len(reconstructed), len(frame))
+	}
+}
+
+func TestNTPEncodeDecode(t *testing.T) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+		DstMAC:       net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 20),
+		DstIP:    net.IPv4(216, 239, 35, 0),
+	}
+	udp := &layers.UDP{
+		SrcPort: 54321,
+		DstPort: 123,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
+		t.Fatalf("set udp checksum: %v", err)
+	}
+	ntp := &layers.NTP{
+		LeapIndicator:      0, // no warning
+		Version:            4,
+		Mode:               3, // client
+		Stratum:            0,
+		Poll:               3,
+		Precision:          -6,
+		RootDelay:          0x00010000,
+		RootDispersion:     0x00020000,
+		ReferenceID:        0x4c4f434c,
+		ReferenceTimestamp: 0xE63B_7B00_00000000,
+		TransmitTimestamp:  0xE63B_7C00_12345678,
+	}
+
+	frame := serializeLayers(t, eth, ip4, udp, ntp)
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  200,
+		Timestamp: time.Unix(1700000300, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentNTP) {
+		t.Fatalf("expected NTP component bit set")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("did not expect raw frame fallback")
+	}
+
+	ntpComp := findNTPComponent(encoded.Components)
+	if ntpComp == nil {
+		t.Fatalf("NTP component missing from list")
+	}
+	if ntpComp.Version != 4 {
+		t.Fatalf("version mismatch: got %d want 4", ntpComp.Version)
+	}
+	if ntpComp.Mode != 3 { // 3 = client
+		t.Fatalf("mode mismatch: got %d want 3 (client)", ntpComp.Mode)
+	}
+	if ntpComp.TransmitTS != 0xE63B_7C00_12345678 {
+		t.Fatalf("transmit_ts mismatch: got 0x%x", ntpComp.TransmitTS)
+	}
+
+	rawTail := findRawTailComponent(encoded.Components)
+	if rawTail != nil && len(rawTail.Bytes) > 0 {
+		t.Fatalf("expected empty raw_tail for NTP packet, got %d bytes", len(rawTail.Bytes))
+	}
+
+	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(reconstructed, frame) {
+		t.Fatalf("reconstructed frame mismatch (len got %d want %d)", len(reconstructed), len(frame))
+	}
+}
+
+func TestDNSTruncatedPayload(t *testing.T) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+		DstMAC:       net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 1),
+		DstIP:    net.IPv4(192, 0, 2, 2),
+	}
+	udp := &layers.UDP{
+		SrcPort: 12345,
+		DstPort: 53,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
+		t.Fatalf("set udp checksum: %v", err)
+	}
+	// 3-byte DNS payload — too short to parse (DNS requires >= 12 bytes)
+	badDNS := []byte{0xde, 0xad, 0xbe}
+	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badDNS))
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  300,
+		Timestamp: time.Unix(1700000400, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
+		t.Fatalf("expected no DNS component for truncated payload")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("did not expect raw frame fallback")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("expected IPv4 component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentUDP) {
+		t.Fatalf("expected UDP component")
+	}
+
+	rawTail := findRawTailComponent(encoded.Components)
+	if rawTail == nil {
+		t.Fatalf("expected raw_tail to contain malformed DNS bytes")
+	}
+	if len(rawTail.Bytes) < len(badDNS) || !bytes.Equal(rawTail.Bytes[:len(badDNS)], badDNS) {
+		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	}
+
+	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(reconstructed, frame) {
+		t.Fatalf("reconstructed frame mismatch (len got %d want %d)", len(reconstructed), len(frame))
+	}
+}
+
+func TestDNSMalformedQuestions(t *testing.T) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+		DstMAC:       net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 1),
+		DstIP:    net.IPv4(192, 0, 2, 2),
+	}
+	udp := &layers.UDP{
+		SrcPort: 12346,
+		DstPort: 53,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
+		t.Fatalf("set udp checksum: %v", err)
+	}
+	// Valid 12-byte DNS header claiming qdcount=1, but no question data follows.
+	// gopacket will fail to parse the question section ("dns name offset too high").
+	badDNS := []byte{
+		0xab, 0xcd, // transaction ID
+		0x01, 0x00, // flags: QR=0 (query), RD=1
+		0x00, 0x01, // qdcount = 1
+		0x00, 0x00, // ancount = 0
+		0x00, 0x00, // nscount = 0
+		0x00, 0x00, // arcount = 0
+		// no question data
+	}
+	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badDNS))
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  301,
+		Timestamp: time.Unix(1700000401, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
+		t.Fatalf("expected no DNS component for malformed questions")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("did not expect raw frame fallback")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("expected IPv4 component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentUDP) {
+		t.Fatalf("expected UDP component")
+	}
+
+	rawTail := findRawTailComponent(encoded.Components)
+	if rawTail == nil {
+		t.Fatalf("expected raw_tail to contain malformed DNS bytes")
+	}
+	if len(rawTail.Bytes) < len(badDNS) || !bytes.Equal(rawTail.Bytes[:len(badDNS)], badDNS) {
+		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	}
+
+	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(reconstructed, frame) {
+		t.Fatalf("reconstructed frame mismatch (len got %d want %d)", len(reconstructed), len(frame))
+	}
+}
+
+func TestNTPTruncatedPayload(t *testing.T) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+		DstMAC:       net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 10),
+		DstIP:    net.IPv4(216, 239, 35, 0),
+	}
+	udp := &layers.UDP{
+		SrcPort: 54322,
+		DstPort: 123,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
+		t.Fatalf("set udp checksum: %v", err)
+	}
+	// 10-byte NTP payload — too short to parse (NTP requires >= 48 bytes)
+	badNTP := make([]byte, 10)
+	badNTP[0] = 0x1b // LI=0, VN=3, Mode=3 (client)
+	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badNTP))
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  302,
+		Timestamp: time.Unix(1700000402, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentNTP) {
+		t.Fatalf("expected no NTP component for truncated payload")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("did not expect raw frame fallback")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("expected IPv4 component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentUDP) {
+		t.Fatalf("expected UDP component")
+	}
+
+	rawTail := findRawTailComponent(encoded.Components)
+	if rawTail == nil {
+		t.Fatalf("expected raw_tail to contain truncated NTP bytes")
+	}
+	if len(rawTail.Bytes) < len(badNTP) || !bytes.Equal(rawTail.Bytes[:len(badNTP)], badNTP) {
+		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	}
+
+	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(reconstructed, frame) {
+		t.Fatalf("reconstructed frame mismatch (len got %d want %d)", len(reconstructed), len(frame))
+	}
+}
+
 func buildIPv6Header(payloadLen int, nextHeader uint8, hopLimit uint8, trafficClass uint8) []byte {
 	header := make([]byte, 40)
 	header[0] = 0x60 | ((trafficClass >> 4) & 0x0F)

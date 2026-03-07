@@ -145,6 +145,8 @@ var knownComponents = map[string]struct {
 	"ipv6_ext":     {"pcap_ipv6_ext", "ipv6_ext"},
 	"tcp":          {"pcap_tcp", "tcp"},
 	"udp":          {"pcap_udp", "udp"},
+	"dns":          {"pcap_dns", "dns"},
+	"ntp":          {"pcap_ntp", "ntp"},
 	"raw_tail":     {"pcap_raw_tail", "raw_tail"},
 }
 

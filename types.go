@@ -18,6 +18,10 @@ type Config struct {
 	FlushInterval time.Duration
 	Debug         bool
 	Logger        *slog.Logger // nil uses slog.Default()
+
+	// DisableStreamTracking skips TCP stream reassembly and L7 protocol
+	// detection during ingest. Stream tracking is enabled by default.
+	DisableStreamTracking bool
 }
 
 // CaptureMeta describes one stored capture's global metadata.
