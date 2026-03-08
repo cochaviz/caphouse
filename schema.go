@@ -34,57 +34,24 @@ func (c *Client) InitSchema(ctx context.Context) error {
 
 	capturesTable := c.capturesTable()
 	packetsTable := c.packetsTable()
-	ethernetTable := c.ethernetTable()
-	dot1qTable := c.dot1qTable()
-	linuxSLLTable := c.linuxSLLTable()
-	ipv4Table := c.ipv4Table()
-	ipv6Table := c.ipv6Table()
-	ipv6ExtTable := c.ipv6ExtTable()
-	tcpTable := c.tcpTable()
-	udpTable := c.udpTable()
-	dnsTable := c.dnsTable()
-	ntpTable := c.ntpTable()
 	streamCapturesTable := c.streamCapturesTable()
 	streamHTTPTable := c.streamHTTPTable()
 
 	if err := c.conn.Exec(ctx, applySchema(capturesSchemaSQL, capturesTable)); err != nil {
 		return fmt.Errorf("create captures table: %w", err)
 	}
-
 	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, packetsTable)); err != nil {
 		return fmt.Errorf("create packets table: %w", err)
 	}
 
-	if err := c.conn.Exec(ctx, components.EthernetSchema(ethernetTable)); err != nil {
-		return fmt.Errorf("create ethernet table: %w", err)
+	for _, ctor := range components.ComponentFactories {
+		proto := ctor()
+		table := c.tableRef(proto.Table())
+		if err := c.conn.Exec(ctx, proto.Schema(table)); err != nil {
+			return fmt.Errorf("create %s table: %w", proto.Table(), err)
+		}
 	}
-	if err := c.conn.Exec(ctx, components.Dot1QSchema(dot1qTable)); err != nil {
-		return fmt.Errorf("create dot1q table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.LinuxSLLSchema(linuxSLLTable)); err != nil {
-		return fmt.Errorf("create linux sll table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.IPv4Schema(ipv4Table)); err != nil {
-		return fmt.Errorf("create ipv4 table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.IPv6Schema(ipv6Table)); err != nil {
-		return fmt.Errorf("create ipv6 table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.IPv6ExtSchema(ipv6ExtTable)); err != nil {
-		return fmt.Errorf("create ipv6 ext table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.TCPSchema(tcpTable)); err != nil {
-		return fmt.Errorf("create tcp table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.UDPSchema(udpTable)); err != nil {
-		return fmt.Errorf("create udp table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.DNSSchema(dnsTable)); err != nil {
-		return fmt.Errorf("create dns table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.NTPSchema(ntpTable)); err != nil {
-		return fmt.Errorf("create ntp table: %w", err)
-	}
+
 	if err := c.conn.Exec(ctx, streams.CapturesSchema(streamCapturesTable)); err != nil {
 		return fmt.Errorf("create stream_captures table: %w", err)
 	}
@@ -95,11 +62,10 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	indexes := []string{
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_capture (capture_id) TYPE set(10000) GRANULARITY 1", packetsTable),
 	}
-	indexes = append(indexes, components.IPv4Indexes(ipv4Table)...)
-	indexes = append(indexes, components.IPv6Indexes(ipv6Table)...)
-	indexes = append(indexes, components.TCPIndexes(tcpTable)...)
-	indexes = append(indexes, components.UDPIndexes(udpTable)...)
-	indexes = append(indexes, components.DNSIndexes(dnsTable)...)
+	for _, ctor := range components.ComponentFactories {
+		proto := ctor()
+		indexes = append(indexes, proto.Indexes(c.tableRef(proto.Table()))...)
+	}
 	indexes = append(indexes, streams.CapturesIndexes(streamCapturesTable)...)
 	indexes = append(indexes, streams.HTTPIndexes(streamHTTPTable)...)
 	for _, stmt := range indexes {
@@ -120,20 +86,16 @@ func (c *Client) tableRef(table string) string {
 	return fmt.Sprintf("%s.%s", quoteIdent(c.cfg.Database), quoteIdent(table))
 }
 
-func (c *Client) capturesTable() string      { return c.tableRef("pcap_captures") }
-func (c *Client) packetsTable() string       { return c.tableRef("pcap_packets") }
-func (c *Client) ethernetTable() string      { return c.tableRef("pcap_ethernet") }
-func (c *Client) dot1qTable() string         { return c.tableRef("pcap_dot1q") }
-func (c *Client) linuxSLLTable() string      { return c.tableRef("pcap_linuxsll") }
-func (c *Client) ipv4Table() string          { return c.tableRef("pcap_ipv4") }
-func (c *Client) ipv6Table() string          { return c.tableRef("pcap_ipv6") }
-func (c *Client) ipv6ExtTable() string       { return c.tableRef("pcap_ipv6_ext") }
-func (c *Client) tcpTable() string           { return c.tableRef("pcap_tcp") }
-func (c *Client) udpTable() string           { return c.tableRef("pcap_udp") }
-func (c *Client) dnsTable() string           { return c.tableRef("pcap_dns") }
-func (c *Client) ntpTable() string           { return c.tableRef("pcap_ntp") }
+func (c *Client) capturesTable() string       { return c.tableRef("pcap_captures") }
+func (c *Client) packetsTable() string        { return c.tableRef("pcap_packets") }
 func (c *Client) streamCapturesTable() string { return c.tableRef("stream_captures") }
-func (c *Client) streamHTTPTable() string    { return c.tableRef("stream_http") }
+func (c *Client) streamHTTPTable() string     { return c.tableRef("stream_http") }
+
+// componentTable returns the fully-qualified table reference for the component
+// of the given kind, as registered in ComponentFactories.
+func (c *Client) componentTable(kind uint) string {
+	return c.tableRef(components.ComponentFactories[kind]().Table())
+}
 
 
 func quoteIdent(name string) string {

@@ -89,11 +89,8 @@ func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func UDPSchema(table string) string {
-	return applySchema(udpSchemaSQL, table)
-}
-
-func UDPIndexes(table string) []string {
+func (c *UDPComponent) Schema(table string) string { return applySchema(udpSchemaSQL, table) }
+func (c *UDPComponent) Indexes(table string) []string {
 	return []string{
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_port (dst_port) TYPE bloom_filter GRANULARITY 4", table),
 	}

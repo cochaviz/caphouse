@@ -182,11 +182,8 @@ func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
 	return []Component{comp}, nil
 }
 
-func IPv4Schema(table string) string {
-	return applySchema(ipv4SchemaSQL, table)
-}
-
-func IPv4Indexes(table string) []string {
+func (c *IPv4Component) Schema(table string) string { return applySchema(ipv4SchemaSQL, table) }
+func (c *IPv4Component) Indexes(table string) []string {
 	return []string{
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_v4 (dst_ip_v4) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),

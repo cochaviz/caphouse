@@ -127,6 +127,5 @@ func (c *NTPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func NTPSchema(table string) string {
-	return applySchema(ntpSchemaSQL, table)
-}
+func (c *NTPComponent) Schema(table string) string { return applySchema(ntpSchemaSQL, table) }
+func (c *NTPComponent) Indexes(_ string) []string  { return nil }

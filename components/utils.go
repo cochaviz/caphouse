@@ -25,12 +25,21 @@ func boolToUint8(v bool) uint8 {
 	return 0
 }
 
+// clickhouseWriter is the minimal interface needed to INSERT a row into ClickHouse.
+// It is a subset of ClickhouseMapper, used by CreateBatch so that callers are
+// not required to implement the full mapper interface.
+type clickhouseWriter interface {
+	Table() string
+	ClickhouseColumns() ([]string, error)
+	ClickhouseValues() ([]any, error)
+}
+
 // CreateBatch creates a batch for an array of components _of single type_ into a ClickHouse table.
 // Unknown behavior for components of different types. (probably very bad)
 func CreateBatch(
 	ctx context.Context,
 	conn clickhouse.Conn,
-	components []ClickhouseMapper,
+	components []clickhouseWriter,
 ) (chdriver.Batch, error) {
 	if len(components) == 0 {
 		return nil, fmt.Errorf("no components provided")

@@ -280,7 +280,7 @@ const maxRangesPerQuery = 1000
 
 func (c *Client) fetchComponentBatch(
 	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
-	ctor func() components.ComponentFetcher,
+	ctor func() components.Component,
 ) (map[uint64][]components.Component, error) {
 	m := make(map[uint64][]components.Component)
 	ranges := toRanges(packetIDs)

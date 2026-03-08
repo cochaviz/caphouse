@@ -87,6 +87,5 @@ func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func LinuxSLLSchema(table string) string {
-	return applySchema(linuxsllSchemaSQL, table)
-}
+func (c *LinuxSLLComponent) Schema(table string) string { return applySchema(linuxsllSchemaSQL, table) }
+func (c *LinuxSLLComponent) Indexes(_ string) []string  { return nil }

@@ -128,7 +128,7 @@ func TestCreateBatchBuildsQueryAndAppends(t *testing.T) {
 		Optional:  nil,
 	}
 
-	batch, err := CreateBatch(ctx, conn, []ClickhouseMapper{comp1, comp2})
+	batch, err := CreateBatch(ctx, conn, []clickhouseWriter{comp1, comp2})
 	if err != nil {
 		t.Fatalf("CreateBatch: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestCreateBatchRejectsEmptySlice(t *testing.T) {
 }
 
 func TestCreateBatchRejectsTableMismatch(t *testing.T) {
-	_, err := CreateBatch(context.Background(), &fakeConn{}, []ClickhouseMapper{
+	_, err := CreateBatch(context.Background(), &fakeConn{}, []clickhouseWriter{
 		testComponent{CaptureID: "cap"},
 		otherComponent{ID: "id"},
 	})

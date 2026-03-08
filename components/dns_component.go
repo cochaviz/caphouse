@@ -154,11 +154,8 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func DNSSchema(table string) string {
-	return applySchema(dnsSchemaSQL, table)
-}
-
-func DNSIndexes(table string) []string {
+func (c *DNSComponent) Schema(table string) string { return applySchema(dnsSchemaSQL, table) }
+func (c *DNSComponent) Indexes(table string) []string {
 	return []string{
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_questions_name (questions_name) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_rcode (rcode) TYPE set(256) GRANULARITY 4", table),

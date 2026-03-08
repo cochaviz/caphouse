@@ -88,6 +88,5 @@ func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func IPv6ExtSchema(table string) string {
-	return applySchema(ipv6ExtSchemaSQL, table)
-}
+func (c *IPv6ExtComponent) Schema(table string) string { return applySchema(ipv6ExtSchemaSQL, table) }
+func (c *IPv6ExtComponent) Indexes(_ string) []string  { return nil }

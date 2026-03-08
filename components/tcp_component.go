@@ -184,11 +184,8 @@ func (c *TCPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func TCPSchema(table string) string {
-	return applySchema(tcpSchemaSQL, table)
-}
-
-func TCPIndexes(table string) []string {
+func (c *TCPComponent) Schema(table string) string { return applySchema(tcpSchemaSQL, table) }
+func (c *TCPComponent) Indexes(table string) []string {
 	return []string{
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_port (dst_port) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_flags (flags) TYPE set(512) GRANULARITY 4", table),

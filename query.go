@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"caphouse/components"
+
 	"github.com/google/uuid"
 )
 
@@ -131,24 +133,19 @@ func inlineArgs(sql string, args []any) string {
 	return b.String()
 }
 
-// knownComponents maps component flag values to their table name suffixes and aliases.
-var knownComponents = map[string]struct {
-	table string
-	alias string
-}{
-	"ethernet":     {"pcap_ethernet", "ethernet"},
-	"dot1q":        {"pcap_dot1q", "dot1q"},
-	"linuxsll":     {"pcap_linuxsll", "linuxsll"},
-	"ipv4":         {"pcap_ipv4", "ipv4"},
-	"ipv4_options": {"pcap_ipv4_options", "ipv4_options"},
-	"ipv6":         {"pcap_ipv6", "ipv6"},
-	"ipv6_ext":     {"pcap_ipv6_ext", "ipv6_ext"},
-	"tcp":          {"pcap_tcp", "tcp"},
-	"udp":          {"pcap_udp", "udp"},
-	"dns":          {"pcap_dns", "dns"},
-	"ntp":          {"pcap_ntp", "ntp"},
-	"raw_tail":     {"pcap_raw_tail", "raw_tail"},
-}
+// knownComponents maps user-facing component names (e.g. "ipv4") to their
+// ClickHouse table name and SQL alias. Derived from the component registry so
+// that adding a new component requires no change here.
+var knownComponents = func() map[string]struct{ table, alias string } {
+	m := make(map[string]struct{ table, alias string }, len(components.ComponentFactories))
+	for _, ctor := range components.ComponentFactories {
+		proto := ctor()
+		table := proto.Table()
+		alias := strings.TrimPrefix(table, "pcap_")
+		m[alias] = struct{ table, alias string }{table, alias}
+	}
+	return m
+}()
 
 // GenerateSQL returns a SELECT statement equivalent to the filter query with
 // all bind parameters inlined. components is a list of protocol table names
@@ -295,8 +292,8 @@ func (n *hostNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
 		))
 	}
 
-	add(c.ipv4Table(), "src_ip_v4", "dst_ip_v4")
-	add(c.ipv6Table(), "src_ip_v6", "dst_ip_v6")
+	add(c.componentTable(components.ComponentIPv4), "src_ip_v4", "dst_ip_v4")
+	add(c.componentTable(components.ComponentIPv6), "src_ip_v6", "dst_ip_v6")
 	return strings.Join(parts, " UNION DISTINCT "), args, nil
 }
 
@@ -331,8 +328,8 @@ func (n *portNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
 		))
 	}
 
-	add(c.tcpTable())
-	add(c.udpTable())
+	add(c.componentTable(components.ComponentTCP))
+	add(c.componentTable(components.ComponentUDP))
 	return strings.Join(parts, " UNION DISTINCT "), args, nil
 }
 

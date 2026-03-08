@@ -97,6 +97,5 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func EthernetSchema(table string) string {
-	return applySchema(ethernetSchemaSQL, table)
-}
+func (c *EthernetComponent) Schema(table string) string { return applySchema(ethernetSchemaSQL, table) }
+func (c *EthernetComponent) Indexes(_ string) []string  { return nil }

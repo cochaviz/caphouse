@@ -87,11 +87,17 @@ func (p PacketNucleus) ClickhouseValues() ([]any, error) {
 	return GetClickhouseValuesFrom(p)
 }
 
-// ClickhouseMapper provides table/column mapping for ClickHouse inserts.
+// ClickhouseMapper covers all ClickHouse concerns for a component: schema
+// creation, INSERT (columns/values), and SELECT (scan columns/rows).
 type ClickhouseMapper interface {
 	Table() string
 	ClickhouseColumns() ([]string, error)
 	ClickhouseValues() ([]any, error)
+	ScanColumns() []string
+	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
+	FetchOrderBy() string
+	Schema(table string) string
+	Indexes(table string) []string
 }
 
 // LayerDecoder defines the reconstruct contract for decoded layers.
@@ -181,26 +187,18 @@ func GetClickhouseColumnsFrom(v any) ([]string, error) {
 	return cols, nil
 }
 
-// ComponentFetcher extends Component with SELECT/scan capability.
-type ComponentFetcher interface {
-	Component
-	ScanColumns() []string
-	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
-	FetchOrderBy() string
-}
-
 // ComponentFactories maps component kind constants to zero-value constructors.
-var ComponentFactories = map[uint]func() ComponentFetcher{
-	ComponentEthernet: func() ComponentFetcher { return &EthernetComponent{} },
-	ComponentDot1Q:    func() ComponentFetcher { return &Dot1QComponent{} },
-	ComponentLinuxSLL: func() ComponentFetcher { return &LinuxSLLComponent{} },
-	ComponentIPv4:     func() ComponentFetcher { return &IPv4Component{} },
-	ComponentIPv6:     func() ComponentFetcher { return &IPv6Component{} },
-	ComponentIPv6Ext:  func() ComponentFetcher { return &IPv6ExtComponent{} },
-	ComponentTCP:      func() ComponentFetcher { return &TCPComponent{} },
-	ComponentUDP:      func() ComponentFetcher { return &UDPComponent{} },
-	ComponentDNS:      func() ComponentFetcher { return &DNSComponent{} },
-	ComponentNTP:      func() ComponentFetcher { return &NTPComponent{} },
+var ComponentFactories = map[uint]func() Component{
+	ComponentEthernet: func() Component { return &EthernetComponent{} },
+	ComponentDot1Q:    func() Component { return &Dot1QComponent{} },
+	ComponentLinuxSLL: func() Component { return &LinuxSLLComponent{} },
+	ComponentIPv4:     func() Component { return &IPv4Component{} },
+	ComponentIPv6:     func() Component { return &IPv6Component{} },
+	ComponentIPv6Ext:  func() Component { return &IPv6ExtComponent{} },
+	ComponentTCP:      func() Component { return &TCPComponent{} },
+	ComponentUDP:      func() Component { return &UDPComponent{} },
+	ComponentDNS:      func() Component { return &DNSComponent{} },
+	ComponentNTP:      func() Component { return &NTPComponent{} },
 }
 
 func GetClickhouseValuesFrom(v any) ([]any, error) {

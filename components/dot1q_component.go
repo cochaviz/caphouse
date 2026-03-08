@@ -89,6 +89,5 @@ func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	}}, nil
 }
 
-func Dot1QSchema(table string) string {
-	return applySchema(dot1qSchemaSQL, table)
-}
+func (c *Dot1QComponent) Schema(table string) string { return applySchema(dot1qSchemaSQL, table) }
+func (c *Dot1QComponent) Indexes(_ string) []string  { return nil }
