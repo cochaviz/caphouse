@@ -1,8 +1,10 @@
 nav:
-  - Home: index.md
-  - Quickstart: quickstart.md
-  - Filter Syntax: filters.md
-  - Reference:
-    - All Flags: reference.md
-    - Storage & Compression: storage.md
-  - Changelog: changelog.md
+    - Home: index.md
+    - Quickstart: quickstart.md
+    - Filter Syntax: filters.md
+    - Reference:
+          - All Flags: reference.md
+          - Storage & Compression: storage.md
+    - Contributing:
+          - Development: development.md
+    - Changelog: changelog.md
