@@ -71,7 +71,7 @@ func (c *Dot1QComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint6
 	return c.PacketID, err
 }
 
-func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	tag, ok := layer.(*layers.Dot1Q)
 	if !ok {
 		return nil, errors.New("unsupported dot1q layer")
@@ -80,7 +80,7 @@ func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder
 	if len(contents) < 4 {
 		return nil, ErrShortFrame
 	}
-	return []ClickhouseMappedDecoder{&Dot1QComponent{
+	return []Component{&Dot1QComponent{
 		CodecVersion: CodecVersionV1,
 		Priority:     tag.Priority,
 		DropEligible: boolToUint8(tag.DropEligible),

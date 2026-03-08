@@ -38,14 +38,12 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	dot1qTable := c.dot1qTable()
 	linuxSLLTable := c.linuxSLLTable()
 	ipv4Table := c.ipv4Table()
-	ipv4OptionsTable := c.ipv4OptionsTable()
 	ipv6Table := c.ipv6Table()
 	ipv6ExtTable := c.ipv6ExtTable()
 	tcpTable := c.tcpTable()
 	udpTable := c.udpTable()
 	dnsTable := c.dnsTable()
 	ntpTable := c.ntpTable()
-	rawTailTable := c.rawTailTable()
 	streamCapturesTable := c.streamCapturesTable()
 	streamHTTPTable := c.streamHTTPTable()
 
@@ -69,9 +67,6 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	if err := c.conn.Exec(ctx, components.IPv4Schema(ipv4Table)); err != nil {
 		return fmt.Errorf("create ipv4 table: %w", err)
 	}
-	if err := c.conn.Exec(ctx, components.IPv4OptionsSchema(ipv4OptionsTable)); err != nil {
-		return fmt.Errorf("create ipv4 options table: %w", err)
-	}
 	if err := c.conn.Exec(ctx, components.IPv6Schema(ipv6Table)); err != nil {
 		return fmt.Errorf("create ipv6 table: %w", err)
 	}
@@ -89,9 +84,6 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	}
 	if err := c.conn.Exec(ctx, components.NTPSchema(ntpTable)); err != nil {
 		return fmt.Errorf("create ntp table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, components.RawTailSchema(rawTailTable)); err != nil {
-		return fmt.Errorf("create raw tail table: %w", err)
 	}
 	if err := c.conn.Exec(ctx, streams.CapturesSchema(streamCapturesTable)); err != nil {
 		return fmt.Errorf("create stream_captures table: %w", err)
@@ -134,14 +126,12 @@ func (c *Client) ethernetTable() string      { return c.tableRef("pcap_ethernet"
 func (c *Client) dot1qTable() string         { return c.tableRef("pcap_dot1q") }
 func (c *Client) linuxSLLTable() string      { return c.tableRef("pcap_linuxsll") }
 func (c *Client) ipv4Table() string          { return c.tableRef("pcap_ipv4") }
-func (c *Client) ipv4OptionsTable() string   { return c.tableRef("pcap_ipv4_options") }
 func (c *Client) ipv6Table() string          { return c.tableRef("pcap_ipv6") }
 func (c *Client) ipv6ExtTable() string       { return c.tableRef("pcap_ipv6_ext") }
 func (c *Client) tcpTable() string           { return c.tableRef("pcap_tcp") }
 func (c *Client) udpTable() string           { return c.tableRef("pcap_udp") }
 func (c *Client) dnsTable() string           { return c.tableRef("pcap_dns") }
 func (c *Client) ntpTable() string           { return c.tableRef("pcap_ntp") }
-func (c *Client) rawTailTable() string       { return c.tableRef("pcap_raw_tail") }
 func (c *Client) streamCapturesTable() string { return c.tableRef("stream_captures") }
 func (c *Client) streamHTTPTable() string    { return c.tableRef("stream_http") }
 

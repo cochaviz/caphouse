@@ -76,12 +76,12 @@ func (c *IPv6ExtComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uin
 	return c.PacketID, err
 }
 
-func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	contents := layer.LayerContents()
 	if len(contents) == 0 {
 		return nil, ErrShortFrame
 	}
-	return []ClickhouseMappedDecoder{&IPv6ExtComponent{
+	return []Component{&IPv6ExtComponent{
 		CodecVersion: CodecVersionV1,
 		ExtType:      uint16(layer.LayerType()),
 		ExtRaw:       copyBytes(contents),

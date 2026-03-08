@@ -5,7 +5,7 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-var LayerEncoders = map[gopacket.LayerType]LayerEncoder{
+var LayerEncoders = map[gopacket.LayerType]Component{
 	layers.LayerTypeEthernet:        &EthernetComponent{},
 	layers.LayerTypeDot1Q:           &Dot1QComponent{},
 	layers.LayerTypeLinuxSLL:        &LinuxSLLComponent{},

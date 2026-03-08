@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func findDot1QComponents(comps []components.ClickhouseMappedDecoder) []*components.Dot1QComponent {
+func findDot1QComponents(comps []components.Component) []*components.Dot1QComponent {
 	out := []*components.Dot1QComponent{}
 	for _, comp := range comps {
 		if tag, ok := comp.(*components.Dot1QComponent); ok {
@@ -23,12 +23,9 @@ func findDot1QComponents(comps []components.ClickhouseMappedDecoder) []*componen
 	return out
 }
 
-func sumHeaderLen(comps []components.ClickhouseMappedDecoder) int {
+func sumHeaderLen(comps []components.Component) int {
 	total := 0
 	for _, comp := range comps {
-		if comp.Kind() == components.ComponentRawTail {
-			continue
-		}
 		total += comp.HeaderLen()
 	}
 	return total
@@ -93,11 +90,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 	if encoded.Nucleus.TailOffset != uint16(expectedOffset) {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, expectedOffset)
 	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 }
@@ -140,14 +133,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentTCP) {
 		t.Fatalf("expected tcp component")
 	}
-	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component (tcp payload)")
-	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	// Roundtrip
@@ -201,14 +187,161 @@ func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("expected ipv6 component")
 	}
-	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
-	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
+	}
+}
+
+// TestTruncatedUDPHeaderStillParsesL3 checks that a frame whose UDP header is
+// shorter than the required 8 bytes still produces Ethernet + IPv4 components,
+// with the truncated UDP bytes stored in FrameRaw (no raw-frame fallback).
+func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
+	partialUDP := []byte{0x04, 0xd2, 0x16, 0x2e} // 4 bytes: src/dst port only
+	ipHeader := buildIPv4Header(nil, len(partialUDP))
+	// buildIPv4Header sets proto=17 (UDP) — no change needed
+	frame := buildEthernetFrame(testEtherTypeIPv4, append(ipHeader, partialUDP...))
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  30,
+		Timestamp: time.Unix(1700000500, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("unexpected raw-frame fallback for truncated UDP")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("expected IPv4 component")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentUDP) {
+		t.Fatalf("did not expect UDP component for truncated header")
+	}
+
+	wantOffset := uint16(14 + 20) // Ethernet + IPv4 only
+	if encoded.Nucleus.TailOffset != wantOffset {
+		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
+	}
+	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialUDP) {
+		t.Fatalf("FrameRaw does not start with partial UDP bytes: %x", encoded.Nucleus.FrameRaw)
+	}
+
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
+	}
+}
+
+// TestTruncatedTCPHeaderStillParsesL3 checks that a frame whose TCP header is
+// shorter than the required 20 bytes still produces Ethernet + IPv4 components,
+// with the truncated TCP bytes stored in FrameRaw (no raw-frame fallback).
+func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
+	partialTCP := make([]byte, 10) // 10 bytes: not enough for a 20-byte TCP header
+	partialTCP[0] = 0x00
+	partialTCP[1] = 0x50 // src port = 80
+	partialTCP[2] = 0x30
+	partialTCP[3] = 0x39 // dst port = 12345
+
+	ipHeader := buildIPv4Header(nil, len(partialTCP))
+	ipHeader[9] = 6 // override proto to TCP
+	frame := buildEthernetFrame(testEtherTypeIPv4, append(ipHeader, partialTCP...))
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  31,
+		Timestamp: time.Unix(1700000501, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("unexpected raw-frame fallback for truncated TCP")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("expected IPv4 component")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentTCP) {
+		t.Fatalf("did not expect TCP component for truncated header")
+	}
+
+	wantOffset := uint16(14 + 20) // Ethernet + IPv4 only
+	if encoded.Nucleus.TailOffset != wantOffset {
+		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
+	}
+	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialTCP) {
+		t.Fatalf("FrameRaw does not start with partial TCP bytes: %x", encoded.Nucleus.FrameRaw)
+	}
+
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
+	}
+}
+
+// TestTruncatedIPv4HeaderStillParsesL2 checks that a frame whose IPv4 header
+// is shorter than the required 20 bytes still produces an Ethernet component,
+// with the truncated IPv4 bytes stored in FrameRaw (no raw-frame fallback).
+func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
+	partialIPv4 := make([]byte, 10) // 10 bytes: not enough for a 20-byte IPv4 header
+	partialIPv4[0] = 0x45           // version=4, IHL=5 (claims 20 bytes but we only supply 10)
+	partialIPv4[1] = 0x00
+	copy(partialIPv4[2:4], []byte{0x00, 0x1e}) // total length = 30
+	partialIPv4[9] = 6                          // protocol = TCP
+	frame := buildEthernetFrame(testEtherTypeIPv4, partialIPv4)
+
+	packet := Packet{
+		CaptureID: uuid.New(),
+		PacketID:  32,
+		Timestamp: time.Unix(1700000502, 0),
+		InclLen:   uint32(len(frame)),
+		OrigLen:   uint32(len(frame)),
+		Frame:     frame,
+	}
+	encoded := EncodePacket(testLinkTypeEthernet, packet)
+
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
+		t.Fatalf("unexpected raw-frame fallback for truncated IPv4")
+	}
+	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
+		t.Fatalf("expected Ethernet component")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
+		t.Fatalf("did not expect IPv4 component for truncated header")
+	}
+	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentTCP) {
+		t.Fatalf("did not expect TCP component")
+	}
+
+	wantOffset := uint16(14) // Ethernet only
+	if encoded.Nucleus.TailOffset != wantOffset {
+		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
+	}
+	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialIPv4) {
+		t.Fatalf("FrameRaw does not start with partial IPv4 bytes: %x", encoded.Nucleus.FrameRaw)
+	}
+
+	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
+	if !bytes.Equal(out, frame) {
+		t.Fatalf("frame roundtrip mismatch")
 	}
 }

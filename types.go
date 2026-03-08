@@ -56,5 +56,5 @@ type Packet struct {
 // CodecPacket bundles the nucleus with ClickHouse-mapped layer decoders.
 type CodecPacket struct {
 	Nucleus    PacketNucleus
-	Components []components.ClickhouseMappedDecoder
+	Components []components.Component
 }

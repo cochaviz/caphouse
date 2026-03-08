@@ -71,7 +71,7 @@ func (c *LinuxSLLComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (ui
 	return c.PacketID, err
 }
 
-func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	sll, ok := layer.(*layers.LinuxSLL)
 	if !ok {
 		return nil, errors.New("unsupported linux sll layer")
@@ -80,7 +80,7 @@ func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDeco
 	if len(contents) == 0 {
 		return nil, ErrShortFrame
 	}
-	return []ClickhouseMappedDecoder{&LinuxSLLComponent{
+	return []Component{&LinuxSLLComponent{
 		CodecVersion: CodecVersionV1,
 		L2Len:        uint16(len(contents)),
 		L2HdrRaw:     copyBytes(contents),

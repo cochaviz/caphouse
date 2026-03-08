@@ -72,7 +72,7 @@ func (c *UDPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64,
 	return c.PacketID, err
 }
 
-func (c *UDPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	udp, ok := layer.(*layers.UDP)
 	if !ok {
 		return nil, errors.New("unsupported udp layer")
@@ -80,7 +80,7 @@ func (c *UDPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, 
 	if len(udp.LayerContents()) < 8 {
 		return nil, ErrShortFrame
 	}
-	return []ClickhouseMappedDecoder{&UDPComponent{
+	return []Component{&UDPComponent{
 		CodecVersion: CodecVersionV1,
 		SrcPort:      uint16(udp.SrcPort),
 		DstPort:      uint16(udp.DstPort),

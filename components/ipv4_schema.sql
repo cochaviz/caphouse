@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   ipv4_flags        UInt8  CODEC(ZSTD(9)),
   ipv4_frag_offset  UInt16,
   ipv4_ttl          UInt8,
-  ipv4_hdr_checksum UInt16
+  ipv4_hdr_checksum UInt16,
+  options_raw       String CODEC(ZSTD(3))
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (dst_ip_v4, src_ip_v4, capture_id, packet_id)

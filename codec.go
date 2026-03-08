@@ -37,7 +37,7 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 		return rawFrameFallback(nucleus, frame)
 	}
 
-	componentList := []components.ClickhouseMappedDecoder{}
+	componentList := []components.Component{}
 	orderCounts := map[uint]uint16{}
 
 	for _, layer := range layerList {
@@ -74,8 +74,7 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 	if orderCounts[components.OrderL2Tag] > 0 && orderCounts[components.OrderL2Base] == 0 {
 		return rawFrameFallback(nucleus, frame)
 	}
-	if (orderCounts[components.OrderL3Options] > 0 || orderCounts[components.OrderL3Ext] > 0) &&
-		orderCounts[components.OrderL3Base] == 0 {
+	if orderCounts[components.OrderL3Ext] > 0 && orderCounts[components.OrderL3Base] == 0 {
 		return rawFrameFallback(nucleus, frame)
 	}
 	if orderCounts[components.OrderL4Base] > 0 && orderCounts[components.OrderL3Base] == 0 {
@@ -90,11 +89,11 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 		}
 	}
 
-	rawTail, err := components.EncodeRawTail(&nucleus, frame, tailOffset)
-	if err != nil {
+	if tailOffset > len(frame) || tailOffset > maxTailOffset {
 		return rawFrameFallback(nucleus, frame)
 	}
-	componentList = append(componentList, rawTail)
+	nucleus.TailOffset = uint16(tailOffset)
+	nucleus.FrameRaw = copyBytes(frame[tailOffset:])
 
 	for _, component := range componentList {
 		if component == nil {
@@ -110,7 +109,7 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 }
 
 // ReconstructFrame rebuilds packet bytes using component presence and tail_offset.
-func ReconstructFrame(nucleus components.PacketNucleus, comps []components.ClickhouseMappedDecoder) ([]byte, error) {
+func ReconstructFrame(nucleus components.PacketNucleus, comps []components.Component) ([]byte, error) {
 	if components.ComponentHas(nucleus.Components, components.ComponentRawFrame) {
 		if len(nucleus.FrameRaw) == 0 {
 			return nil, errors.New("raw frame bit set but frame_raw empty")
@@ -143,7 +142,7 @@ func ReconstructFrame(nucleus components.PacketNucleus, comps []components.Click
 		}
 	}
 
-	sorted := make([]components.ClickhouseMappedDecoder, 0, len(comps))
+	sorted := make([]components.Component, 0, len(comps))
 	for _, component := range comps {
 		if component != nil {
 			sorted = append(sorted, component)
@@ -169,6 +168,13 @@ func ReconstructFrame(nucleus components.PacketNucleus, comps []components.Click
 		if err := component.Reconstruct(&ctx); err != nil {
 			return nil, err
 		}
+	}
+
+	if nucleus.TailOffset > 0 && int(nucleus.TailOffset) != ctx.Offset {
+		return nil, fmt.Errorf("tail_offset mismatch: %d != %d", nucleus.TailOffset, ctx.Offset)
+	}
+	if len(nucleus.FrameRaw) > 0 {
+		ctx.Layers = append(ctx.Layers, gopacket.Payload(nucleus.FrameRaw))
 	}
 
 	if len(ctx.Layers) == 0 {

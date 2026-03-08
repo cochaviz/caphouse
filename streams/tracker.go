@@ -97,7 +97,7 @@ func NewTracker() *Tracker {
 
 // Observe processes one encoded packet. Only packets with the TCP component set
 // are considered. Safe for concurrent use.
-func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.ClickhouseMappedDecoder) {
+func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.Component) {
 	if !components.ComponentHas(nucleus.Components, components.ComponentTCP) {
 		return
 	}
@@ -105,7 +105,6 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 	var tcpComp *components.TCPComponent
 	var ipv4Comp *components.IPv4Component
 	var ipv6Comp *components.IPv6Component
-	var rawTailComp *components.RawTailComponent
 
 	for _, comp := range comps {
 		switch c := comp.(type) {
@@ -115,8 +114,6 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 			ipv4Comp = c
 		case *components.IPv6Component:
 			ipv6Comp = c
-		case *components.RawTailComponent:
-			rawTailComp = c
 		}
 	}
 
@@ -155,9 +152,8 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 
 	st.lastPacketID = nucleus.PacketID
 	st.packetCount++
-	if rawTailComp != nil {
-		st.byteCount += uint64(len(rawTailComp.Bytes))
-	}
+	tailBytes := nucleus.FrameRaw
+	st.byteCount += uint64(len(tailBytes))
 
 	isSYN := tcpComp.Flags&components.TCPFlagSYN != 0
 	isACK := tcpComp.Flags&components.TCPFlagACK != 0
@@ -175,8 +171,8 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 
 	// Attempt L7 protocol detection.
 	// payloadBuf == nil means detection has already concluded (matched or abandoned).
-	if st.proto == nil && st.payloadBuf != nil && rawTailComp != nil && len(rawTailComp.Bytes) > 0 {
-		st.payloadBuf = append(st.payloadBuf, rawTailComp.Bytes...)
+	if st.proto == nil && st.payloadBuf != nil && len(tailBytes) > 0 {
+		st.payloadBuf = append(st.payloadBuf, tailBytes...)
 		if proto := Detect(st.payloadBuf); proto != nil {
 			st.proto = proto
 			if sp, ok := proto.(SessionProtocol); ok {
@@ -188,8 +184,8 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 		}
 	}
 
-	if st.session != nil && rawTailComp != nil && len(rawTailComp.Bytes) > 0 {
-		st.session.Feed(rawTailComp.Bytes)
+	if st.session != nil && len(tailBytes) > 0 {
+		st.session.Feed(tailBytes)
 	}
 }
 

@@ -98,7 +98,7 @@ func (c *NTPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64,
 	return c.PacketID, err
 }
 
-func (c *NTPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *NTPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	ntp, ok := layer.(*layers.NTP)
 	if !ok {
 		return nil, errors.New("unsupported ntp layer")
@@ -108,7 +108,7 @@ func (c *NTPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, 
 		return nil, ErrShortFrame
 	}
 
-	return []ClickhouseMappedDecoder{&NTPComponent{
+	return []Component{&NTPComponent{
 		CodecVersion:   CodecVersionV1,
 		LeapIndicator:  uint8(ntp.LeapIndicator),
 		Version:        uint8(ntp.Version),

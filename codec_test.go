@@ -23,7 +23,7 @@ const (
 	testEtherTypeIPv6    = 0x86DD
 )
 
-func findEthernetComponent(comps []components.ClickhouseMappedDecoder) *components.EthernetComponent {
+func findEthernetComponent(comps []components.Component) *components.EthernetComponent {
 	for _, comp := range comps {
 		if eth, ok := comp.(*components.EthernetComponent); ok {
 			return eth
@@ -32,7 +32,7 @@ func findEthernetComponent(comps []components.ClickhouseMappedDecoder) *componen
 	return nil
 }
 
-func findIPv4Component(comps []components.ClickhouseMappedDecoder) *components.IPv4Component {
+func findIPv4Component(comps []components.Component) *components.IPv4Component {
 	for _, comp := range comps {
 		if ip, ok := comp.(*components.IPv4Component); ok {
 			return ip
@@ -41,16 +41,7 @@ func findIPv4Component(comps []components.ClickhouseMappedDecoder) *components.I
 	return nil
 }
 
-func findIPv4OptionsComponent(comps []components.ClickhouseMappedDecoder) *components.IPv4OptionsComponent {
-	for _, comp := range comps {
-		if opts, ok := comp.(*components.IPv4OptionsComponent); ok {
-			return opts
-		}
-	}
-	return nil
-}
-
-func findIPv6Component(comps []components.ClickhouseMappedDecoder) *components.IPv6Component {
+func findIPv6Component(comps []components.Component) *components.IPv6Component {
 	for _, comp := range comps {
 		if ip, ok := comp.(*components.IPv6Component); ok {
 			return ip
@@ -59,7 +50,7 @@ func findIPv6Component(comps []components.ClickhouseMappedDecoder) *components.I
 	return nil
 }
 
-func findIPv6ExtComponent(comps []components.ClickhouseMappedDecoder) *components.IPv6ExtComponent {
+func findIPv6ExtComponent(comps []components.Component) *components.IPv6ExtComponent {
 	for _, comp := range comps {
 		if ext, ok := comp.(*components.IPv6ExtComponent); ok {
 			return ext
@@ -68,16 +59,7 @@ func findIPv6ExtComponent(comps []components.ClickhouseMappedDecoder) *component
 	return nil
 }
 
-func findRawTailComponent(comps []components.ClickhouseMappedDecoder) *components.RawTailComponent {
-	for _, comp := range comps {
-		if tail, ok := comp.(*components.RawTailComponent); ok {
-			return tail
-		}
-	}
-	return nil
-}
-
-func hasComponentKind(comps []components.ClickhouseMappedDecoder, kind uint) bool {
+func hasComponentKind(comps []components.Component, kind uint) bool {
 	for _, comp := range comps {
 		if comp.Kind() == kind {
 			return true
@@ -126,9 +108,6 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentIPv4) {
 		t.Fatalf("expected ipv4 component")
 	}
-	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
-	}
 
 	wantTailOffset := uint16(14 + 20)
 	if encoded.Nucleus.TailOffset != wantTailOffset {
@@ -141,8 +120,7 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 	if ipComponent.Protocol != 17 {
 		t.Fatalf("protocol mismatch: got %d want 17", ipComponent.Protocol)
 	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil || !bytes.Equal(rawTail.Bytes, payload) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, payload) {
 		t.Fatalf("raw tail mismatch")
 	}
 
@@ -178,8 +156,7 @@ func TestCodecIPv4Options(t *testing.T) {
 	if ipComponent.IPv4IHL != uint8(len(ipHeader)/4) {
 		t.Fatalf("ihl mismatch: got %d want %d", ipComponent.IPv4IHL, len(ipHeader)/4)
 	}
-	optionsComponent := findIPv4OptionsComponent(encoded.Components)
-	if optionsComponent == nil || !bytes.Equal(optionsComponent.OptionsRaw, options) {
+	if !bytes.Equal(ipComponent.OptionsRaw, options) {
 		t.Fatalf("ipv4 options mismatch")
 	}
 
@@ -249,9 +226,6 @@ func TestCodecNonIPFallback(t *testing.T) {
 	encoded := EncodePacket(testLinkTypeEthernet, packet)
 	if findIPv4Component(encoded.Components) != nil || findIPv6Component(encoded.Components) != nil {
 		t.Fatalf("expected no ip component")
-	}
-	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
 	}
 	if encoded.Nucleus.TailOffset != 14 {
 		t.Fatalf("tail_offset mismatch: got %d want 14", encoded.Nucleus.TailOffset)
@@ -343,24 +317,14 @@ func TestCodecIPv4UDP(t *testing.T) {
 	if hasComponentKind(encoded.Components, components.ComponentIPv6) || hasComponentKind(encoded.Components, components.ComponentIPv6Ext) {
 		t.Fatalf("did not expect ipv6 components")
 	}
-	if hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
-		t.Fatalf("did not expect ipv4 options component")
-	}
 	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
 		t.Fatalf("expected udp component")
-	}
-	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
 	}
 
 	if encoded.Nucleus.TailOffset != 14+20+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+20+8)
 	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -411,24 +375,17 @@ func TestCodecIPv6UDP(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("expected ipv6 component")
 	}
-	if hasComponentKind(encoded.Components, components.ComponentIPv4) || hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
-		t.Fatalf("did not expect ipv4 components")
+	if hasComponentKind(encoded.Components, components.ComponentIPv4) {
+		t.Fatalf("did not expect ipv4 component")
 	}
 	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
 		t.Fatalf("expected udp component")
-	}
-	if !hasComponentKind(encoded.Components, components.ComponentRawTail) {
-		t.Fatalf("expected raw tail component")
 	}
 
 	if encoded.Nucleus.TailOffset != 14+40+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+40+8)
 	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -479,8 +436,12 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 	}
 
 	encoded := EncodePacket(testLinkTypeEthernet, packet)
-	if !hasComponentKind(encoded.Components, components.ComponentIPv4Options) {
-		t.Fatalf("expected ipv4 options component")
+	ipComp := findIPv4Component(encoded.Components)
+	if ipComp == nil {
+		t.Fatalf("ipv4 component missing")
+	}
+	if len(ipComp.OptionsRaw) == 0 {
+		t.Fatalf("expected options_raw to be populated")
 	}
 	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
 		t.Fatalf("expected udp component")
@@ -488,11 +449,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 	if encoded.Nucleus.TailOffset != 14+24+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+24+8)
 	}
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("raw tail missing")
-	}
-	if !bytes.Equal(rawTail.Bytes, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -526,16 +483,15 @@ func TestCodecUnsupportedLinkType(t *testing.T) {
 
 func TestCodecTailOffsetMismatch(t *testing.T) {
 	nucleus := components.PacketNucleus{
-		Components: components.NewComponentMask(components.ComponentEthernet, components.ComponentRawTail),
-		TailOffset: 10,
+		Components: components.NewComponentMask(components.ComponentEthernet),
+		TailOffset: 10, // Ethernet is 14 bytes, so 10 != 14 → mismatch
 	}
 	l2 := &components.EthernetComponent{
 		SrcMAC:    []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 		DstMAC:    []byte{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
 		EtherType: testEtherTypeIPv4,
 	}
-	tail := &components.RawTailComponent{Bytes: []byte{0x03}}
-	_, err := ReconstructFrame(nucleus, []components.ClickhouseMappedDecoder{l2, tail})
+	_, err := ReconstructFrame(nucleus, []components.Component{l2})
 	if err == nil {
 		t.Fatalf("expected tail_offset mismatch error")
 	}
@@ -687,7 +643,7 @@ func buildIPv4Header(options []byte, payloadLen int) []byte {
 	return header
 }
 
-func findDNSComponent(comps []components.ClickhouseMappedDecoder) *components.DNSComponent {
+func findDNSComponent(comps []components.Component) *components.DNSComponent {
 	for _, comp := range comps {
 		if c, ok := comp.(*components.DNSComponent); ok {
 			return c
@@ -696,7 +652,7 @@ func findDNSComponent(comps []components.ClickhouseMappedDecoder) *components.DN
 	return nil
 }
 
-func findNTPComponent(comps []components.ClickhouseMappedDecoder) *components.NTPComponent {
+func findNTPComponent(comps []components.Component) *components.NTPComponent {
 	for _, comp := range comps {
 		if c, ok := comp.(*components.NTPComponent); ok {
 			return c
@@ -787,9 +743,8 @@ func TestDNSEncodeDecode(t *testing.T) {
 		t.Fatalf("questions_type[1] mismatch")
 	}
 
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail != nil && len(rawTail.Bytes) > 0 {
-		t.Fatalf("expected empty raw_tail for DNS packet, got %d bytes", len(rawTail.Bytes))
+	if len(encoded.Nucleus.FrameRaw) > 0 {
+		t.Fatalf("expected empty FrameRaw for DNS packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
 	}
 
 	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -870,9 +825,8 @@ func TestNTPEncodeDecode(t *testing.T) {
 		t.Fatalf("transmit_ts mismatch: got 0x%x", ntpComp.TransmitTS)
 	}
 
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail != nil && len(rawTail.Bytes) > 0 {
-		t.Fatalf("expected empty raw_tail for NTP packet, got %d bytes", len(rawTail.Bytes))
+	if len(encoded.Nucleus.FrameRaw) > 0 {
+		t.Fatalf("expected empty FrameRaw for NTP packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
 	}
 
 	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -935,12 +889,8 @@ func TestDNSTruncatedPayload(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("expected raw_tail to contain malformed DNS bytes")
-	}
-	if len(rawTail.Bytes) < len(badDNS) || !bytes.Equal(rawTail.Bytes[:len(badDNS)], badDNS) {
-		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	if len(encoded.Nucleus.FrameRaw) < len(badDNS) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badDNS)], badDNS) {
+		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
 	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1012,12 +962,8 @@ func TestDNSMalformedQuestions(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("expected raw_tail to contain malformed DNS bytes")
-	}
-	if len(rawTail.Bytes) < len(badDNS) || !bytes.Equal(rawTail.Bytes[:len(badDNS)], badDNS) {
-		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	if len(encoded.Nucleus.FrameRaw) < len(badDNS) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badDNS)], badDNS) {
+		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
 	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1081,12 +1027,8 @@ func TestNTPTruncatedPayload(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	rawTail := findRawTailComponent(encoded.Components)
-	if rawTail == nil {
-		t.Fatalf("expected raw_tail to contain truncated NTP bytes")
-	}
-	if len(rawTail.Bytes) < len(badNTP) || !bytes.Equal(rawTail.Bytes[:len(badNTP)], badNTP) {
-		t.Fatalf("raw_tail prefix mismatch: got %x", rawTail.Bytes)
+	if len(encoded.Nucleus.FrameRaw) < len(badNTP) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badNTP)], badNTP) {
+		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
 	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)

@@ -104,7 +104,7 @@ func (c *IPv6Component) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64
 	return c.PacketID, err
 }
 
-func (c *IPv6Component) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *IPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {
 	ip6, ok := layer.(*layers.IPv6)
 	if !ok {
 		return nil, errors.New("unsupported ipv6 layer")
@@ -121,7 +121,7 @@ func (c *IPv6Component) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder,
 	if !ok {
 		dst = netip.Addr{}
 	}
-	return []ClickhouseMappedDecoder{&IPv6Component{
+	return []Component{&IPv6Component{
 		CodecVersion:     CodecVersionV1,
 		ParsedOK:         1,
 		Protocol:         uint8(ip6.NextHeader),

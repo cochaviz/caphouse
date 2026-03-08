@@ -281,8 +281,8 @@ const maxRangesPerQuery = 1000
 func (c *Client) fetchComponentBatch(
 	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
 	ctor func() components.ComponentFetcher,
-) (map[uint64][]components.ClickhouseMappedDecoder, error) {
-	m := make(map[uint64][]components.ClickhouseMappedDecoder)
+) (map[uint64][]components.Component, error) {
+	m := make(map[uint64][]components.Component)
 	ranges := toRanges(packetIDs)
 	for len(ranges) > 0 {
 		chunk := ranges
@@ -322,13 +322,13 @@ func (c *Client) fetchComponentBatch(
 
 type fetchResult struct {
 	kind uint
-	rows map[uint64][]components.ClickhouseMappedDecoder
+	rows map[uint64][]components.Component
 	err  error
 }
 
 func (c *Client) fetchComponentsForBatch(
 	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
-) (map[uint]map[uint64][]components.ClickhouseMappedDecoder, error) {
+) (map[uint]map[uint64][]components.Component, error) {
 	n := len(components.ComponentFactories)
 	results := make(chan fetchResult, n)
 	for kind, ctor := range components.ComponentFactories {
@@ -337,7 +337,7 @@ func (c *Client) fetchComponentsForBatch(
 			results <- fetchResult{kind, rows, err}
 		}()
 	}
-	all := make(map[uint]map[uint64][]components.ClickhouseMappedDecoder, n)
+	all := make(map[uint]map[uint64][]components.Component, n)
 	for range n {
 		r := <-results
 		if r.err != nil {
@@ -351,9 +351,9 @@ func (c *Client) fetchComponentsForBatch(
 // resolveComponents builds the component list for one packet from a pre-fetched batch map.
 func resolveComponents(
 	nucleus components.PacketNucleus,
-	all map[uint]map[uint64][]components.ClickhouseMappedDecoder,
-) ([]components.ClickhouseMappedDecoder, error) {
-	var list []components.ClickhouseMappedDecoder
+	all map[uint]map[uint64][]components.Component,
+) ([]components.Component, error) {
+	var list []components.Component
 	for _, kind := range components.KnownComponentKinds {
 		if !components.ComponentHas(nucleus.Components, kind) {
 			continue
@@ -389,7 +389,7 @@ func writePCAPHeader(w io.Writer, meta captureMetaRow) error {
 	return err
 }
 
-func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.ClickhouseMappedDecoder) {
+func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.Component) {
 	c.log.Debug("packet reconstruction failed",
 		"capture_id", captureID,
 		"packet_id", packetID,
@@ -415,19 +415,14 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 		case *components.IPv4Component:
 			c.log.Debug("component", "index", i, "type", "ipv4",
 				"src", x.SrcIP4, "dst", x.DstIP4,
-				"ihl", x.IPv4IHL, "total_len", x.IPv4TotalLen)
-		case *components.IPv4OptionsComponent:
-			c.log.Debug("component", "index", i, "type", "ipv4_options",
-				"len", len(x.OptionsRaw))
+				"ihl", x.IPv4IHL, "total_len", x.IPv4TotalLen,
+				"options_len", len(x.OptionsRaw))
 		case *components.IPv6Component:
 			c.log.Debug("component", "index", i, "type", "ipv6",
 				"src", x.SrcIP6, "dst", x.DstIP6, "payload_len", x.IPv6PayloadLen)
 		case *components.IPv6ExtComponent:
 			c.log.Debug("component", "index", i, "type", "ipv6_ext",
 				"ext_index", x.ExtIndex, "ext_type", x.ExtType, "len", len(x.ExtRaw))
-		case *components.RawTailComponent:
-			c.log.Debug("component", "index", i, "type", "raw_tail",
-				"offset", x.TailOffset, "len", len(x.Bytes))
 		default:
 			c.log.Debug("component", "index", i, "type", fmt.Sprintf("%T", comp))
 		}

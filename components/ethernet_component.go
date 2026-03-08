@@ -76,7 +76,7 @@ func (c *EthernetComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (ui
 	return c.PacketID, err
 }
 
-func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	eth, ok := layer.(*layers.Ethernet)
 	if !ok {
 		return nil, errors.New("unsupported ethernet layer")
@@ -88,7 +88,7 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDeco
 	if len(eth.SrcMAC) != 6 || len(eth.DstMAC) != 6 {
 		return nil, errors.New("invalid ethernet mac length")
 	}
-	return []ClickhouseMappedDecoder{&EthernetComponent{
+	return []Component{&EthernetComponent{
 		CodecVersion: CodecVersionV1,
 		SrcMAC:       copyBytes(eth.SrcMAC),
 		DstMAC:       copyBytes(eth.DstMAC),

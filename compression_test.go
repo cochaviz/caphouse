@@ -34,8 +34,8 @@ var parseCSV *csv.Writer
 // tables is the ordered list of caphouse schema tables.
 var tables = []string{
 	"pcap_captures", "pcap_packets", "pcap_ethernet", "pcap_dot1q",
-	"pcap_linuxsll", "pcap_ipv4", "pcap_ipv4_options", "pcap_ipv6",
-	"pcap_ipv6_ext", "pcap_raw_tail",
+	"pcap_linuxsll", "pcap_ipv4", "pcap_ipv6", "pcap_ipv6_ext",
+	"pcap_tcp", "pcap_udp", "pcap_dns", "pcap_ntp",
 }
 
 // tableBytes holds the raw system.parts byte counts for one table.

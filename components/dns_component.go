@@ -99,7 +99,7 @@ func (c *DNSComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64,
 	return c.PacketID, err
 }
 
-func (c *DNSComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	dns, ok := layer.(*layers.DNS)
 	if !ok {
 		return nil, errors.New("unsupported dns layer")
@@ -137,7 +137,7 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, 
 		classes[i] = uint16(q.Class)
 	}
 
-	return []ClickhouseMappedDecoder{&DNSComponent{
+	return []Component{&DNSComponent{
 		CodecVersion:   CodecVersionV1,
 		TransactionID:  dns.ID,
 		QR:             qr,

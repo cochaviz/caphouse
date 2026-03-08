@@ -121,7 +121,7 @@ func (c *TCPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64,
 	return c.PacketID, err
 }
 
-func (c *TCPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, error) {
+func (c *TCPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	tcp, ok := layer.(*layers.TCP)
 	if !ok {
 		return nil, errors.New("unsupported tcp layer")
@@ -169,7 +169,7 @@ func (c *TCPComponent) Encode(layer gopacket.Layer) ([]ClickhouseMappedDecoder, 
 		optionsRaw = copyBytes(contents[20:headerLen])
 	}
 
-	return []ClickhouseMappedDecoder{&TCPComponent{
+	return []Component{&TCPComponent{
 		CodecVersion: CodecVersionV1,
 		SrcPort:      uint16(tcp.SrcPort),
 		DstPort:      uint16(tcp.DstPort),

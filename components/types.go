@@ -9,7 +9,6 @@ import (
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"github.com/google/uuid"
 )
 
@@ -24,10 +23,8 @@ const (
 	ComponentDot1Q
 	ComponentLinuxSLL
 	ComponentIPv4
-	ComponentIPv4Options
 	ComponentIPv6
 	ComponentIPv6Ext
-	ComponentRawTail
 	ComponentHash
 	ComponentTruncated
 	ComponentTCP
@@ -40,11 +37,9 @@ const (
 	OrderL2Base uint = iota
 	OrderL2Tag
 	OrderL3Base
-	OrderL3Options
 	OrderL3Ext
 	OrderL4Base
 	OrderL7Base
-	OrderTail
 )
 
 var KnownComponentKinds = []uint{
@@ -52,14 +47,12 @@ var KnownComponentKinds = []uint{
 	ComponentDot1Q,
 	ComponentLinuxSLL,
 	ComponentIPv4,
-	ComponentIPv4Options,
 	ComponentIPv6,
 	ComponentIPv6Ext,
 	ComponentTCP,
 	ComponentUDP,
 	ComponentDNS,
 	ComponentNTP,
-	ComponentRawTail,
 }
 
 var OrderRepeatable = map[uint]bool{
@@ -112,23 +105,24 @@ type LayerDecoder interface {
 	Reconstruct(*DecodeContext) error
 }
 
-// ClickhouseMappedDecoder provides both ClickHouse mapping and layer decode behavior.
-type ClickhouseMappedDecoder interface {
-	ClickhouseMapper
-	LayerDecoder
-}
-
 // DecodeContext carries shared state while reconstructing a frame.
 type DecodeContext struct {
-	Nucleus  PacketNucleus
-	Layers   []gopacket.SerializableLayer
-	Offset   int
-	LastIPv4 *layers.IPv4
+	Nucleus PacketNucleus
+	Layers  []gopacket.SerializableLayer
+	Offset  int
 }
 
 // LayerEncoder defines the encoding contract for a gopacket layer.
 type LayerEncoder interface {
-	Encode(gopacket.Layer) ([]ClickhouseMappedDecoder, error)
+	Encode(gopacket.Layer) ([]Component, error)
+}
+
+// Component is the full interface for a registered component: it can encode a
+// gopacket layer and be decoded/stored in ClickHouse.
+type Component interface {
+	ClickhouseMapper
+	LayerDecoder
+	LayerEncoder
 }
 
 func NewComponentMask(bits ...uint) *big.Int {
@@ -187,9 +181,9 @@ func GetClickhouseColumnsFrom(v any) ([]string, error) {
 	return cols, nil
 }
 
-// ComponentFetcher extends ClickhouseMappedDecoder with SELECT/scan capability.
+// ComponentFetcher extends Component with SELECT/scan capability.
 type ComponentFetcher interface {
-	ClickhouseMappedDecoder
+	Component
 	ScanColumns() []string
 	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
 	FetchOrderBy() string
@@ -197,18 +191,16 @@ type ComponentFetcher interface {
 
 // ComponentFactories maps component kind constants to zero-value constructors.
 var ComponentFactories = map[uint]func() ComponentFetcher{
-	ComponentEthernet:    func() ComponentFetcher { return &EthernetComponent{} },
-	ComponentDot1Q:       func() ComponentFetcher { return &Dot1QComponent{} },
-	ComponentLinuxSLL:    func() ComponentFetcher { return &LinuxSLLComponent{} },
-	ComponentIPv4:        func() ComponentFetcher { return &IPv4Component{} },
-	ComponentIPv4Options: func() ComponentFetcher { return &IPv4OptionsComponent{} },
-	ComponentIPv6:        func() ComponentFetcher { return &IPv6Component{} },
-	ComponentIPv6Ext:     func() ComponentFetcher { return &IPv6ExtComponent{} },
-	ComponentTCP:         func() ComponentFetcher { return &TCPComponent{} },
-	ComponentUDP:         func() ComponentFetcher { return &UDPComponent{} },
-	ComponentDNS:         func() ComponentFetcher { return &DNSComponent{} },
-	ComponentNTP:         func() ComponentFetcher { return &NTPComponent{} },
-	ComponentRawTail:     func() ComponentFetcher { return &RawTailComponent{} },
+	ComponentEthernet: func() ComponentFetcher { return &EthernetComponent{} },
+	ComponentDot1Q:    func() ComponentFetcher { return &Dot1QComponent{} },
+	ComponentLinuxSLL: func() ComponentFetcher { return &LinuxSLLComponent{} },
+	ComponentIPv4:     func() ComponentFetcher { return &IPv4Component{} },
+	ComponentIPv6:     func() ComponentFetcher { return &IPv6Component{} },
+	ComponentIPv6Ext:  func() ComponentFetcher { return &IPv6ExtComponent{} },
+	ComponentTCP:      func() ComponentFetcher { return &TCPComponent{} },
+	ComponentUDP:      func() ComponentFetcher { return &UDPComponent{} },
+	ComponentDNS:      func() ComponentFetcher { return &DNSComponent{} },
+	ComponentNTP:      func() ComponentFetcher { return &NTPComponent{} },
 }
 
 func GetClickhouseValuesFrom(v any) ([]any, error) {
