@@ -32,9 +32,10 @@ type CaptureMeta struct {
 	Snaplen        uint32
 	LinkType       uint32 // DLT, for Ethernet use 1
 	Endianness     string // "le" or "be"
-	TimeResolution string // "us" for classic pcap timestamps
+	TimeResolution string // "us" or "ns" for classic pcap; "pcapng" for pcapng format
+	IsPcapNG       bool   // true when the source file is pcapng format
 
-	GlobalHeaderRaw []byte // optional 24-byte header
+	GlobalHeaderRaw []byte // optional 24-byte classic pcap header
 
 	CodecVersion uint16
 	CodecProfile string
@@ -57,4 +58,7 @@ type Packet struct {
 type CodecPacket struct {
 	Nucleus    PacketNucleus
 	Components []components.Component
+	// BlockRaw holds the raw pcapng EPB/SPB bytes for byte-exact re-export.
+	// Empty for classic PCAP packets.
+	BlockRaw []byte
 }

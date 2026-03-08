@@ -5,7 +5,6 @@ import (
 	"caphouse/components"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -95,6 +94,11 @@ func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (cap
 // the capture are streamed. If non-nil, only packets whose IDs fall within the
 // given ranges are included; ranges must be pre-computed via toRanges.
 func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
+	// PCAPng full-capture export: write the preserved header + raw block bytes.
+	if meta.TimeResolution == "pcapng" && ranges == nil {
+		return c.streamNgCapture(ctx, meta, captureID, w, packetsWritten)
+	}
+
 	buf := bufio.NewWriterSize(w, 128*1024)
 	if err := writePCAPHeader(buf, meta); err != nil {
 		return err
@@ -372,11 +376,13 @@ func writePCAPHeader(w io.Writer, meta captureMetaRow) error {
 		_, err := w.Write(meta.GlobalHeaderRaw)
 		return err
 	}
-	if meta.TimeResolution != "" && meta.TimeResolution != "us" {
-		return fmt.Errorf("unsupported time resolution: %s", meta.TimeResolution)
+	// PCAPng or unknown: write a synthetic classic PCAP LE/µs header so
+	// filtered exports always produce a valid classic PCAP stream.
+	endian := meta.Endianness
+	if endian == "" {
+		endian = "le"
 	}
-
-	order := byteOrder(meta.Endianness)
+	order := byteOrder(endian)
 	var header [24]byte
 	order.PutUint32(header[0:4], 0xA1B2C3D4)
 	order.PutUint16(header[4:6], 2)
@@ -387,6 +393,43 @@ func writePCAPHeader(w io.Writer, meta captureMetaRow) error {
 	order.PutUint32(header[20:24], meta.LinkType)
 	_, err := w.Write(header[:])
 	return err
+}
+
+// streamNgCapture writes a byte-exact pcapng stream for a full (unfiltered) export.
+// It writes the stored GlobalHeaderRaw (SHB + IDBs) followed by the raw block_raw
+// bytes for each packet in order.
+func (c *Client) streamNgCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
+	buf := bufio.NewWriterSize(w, 128*1024)
+	if _, err := buf.Write(meta.GlobalHeaderRaw); err != nil {
+		return fmt.Errorf("write pcapng header: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		"SELECT block_raw FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC",
+		c.packetsTable(),
+	)
+	rows, err := c.conn.Query(ctx, query, captureID)
+	if err != nil {
+		return fmt.Errorf("query packets: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var blockRaw string
+		if err := rows.Scan(&blockRaw); err != nil {
+			return fmt.Errorf("scan block_raw: %w", err)
+		}
+		if _, err := buf.Write([]byte(blockRaw)); err != nil {
+			return fmt.Errorf("write block_raw: %w", err)
+		}
+		if packetsWritten != nil {
+			packetsWritten.Add(1)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate packets: %w", err)
+	}
+	return buf.Flush()
 }
 
 func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.Component) {
@@ -461,37 +504,3 @@ func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl u
 	return nil
 }
 
-func byteOrder(endian string) binary.ByteOrder {
-	if endian == "be" {
-		return binary.BigEndian
-	}
-	return binary.LittleEndian
-}
-
-var errUnsupportedMagic = errors.New("unsupported pcap magic")
-
-// ParseGlobalHeader reads classic PCAP global header bytes into metadata.
-func ParseGlobalHeader(raw []byte) (CaptureMeta, error) {
-	if len(raw) < 24 {
-		return CaptureMeta{}, errors.New("pcap header too short")
-	}
-	magic := binary.LittleEndian.Uint32(raw[0:4])
-	meta := CaptureMeta{TimeResolution: "us"}
-
-	switch magic {
-	case 0xA1B2C3D4:
-		meta.Endianness = "le"
-	case 0xD4C3B2A1:
-		meta.Endianness = "be"
-	case 0xA1B23C4D, 0x4D3CB2A1:
-		return CaptureMeta{}, errors.New("nanosecond pcap not supported")
-	default:
-		return CaptureMeta{}, errUnsupportedMagic
-	}
-
-	order := byteOrder(meta.Endianness)
-	meta.Snaplen = order.Uint32(raw[16:20])
-	meta.LinkType = order.Uint32(raw[20:24])
-	meta.GlobalHeaderRaw = raw[:24]
-	return meta, nil
-}

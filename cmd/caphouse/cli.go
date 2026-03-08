@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -17,9 +15,7 @@ import (
 	"time"
 
 	"caphouse"
-	"caphouse/components"
 
-	"github.com/google/gopacket/pcapgo"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
@@ -275,7 +271,7 @@ func runRead(cmd *cobra.Command, cfg config) error {
 	start := time.Now()
 	stopBar := startProgressBar(fileSize, -1, &p, start, cfg.silent)
 
-	id, err := ingestPCAPStream(ctx, client, cr, captureID, cfg.sensor, &p, packetIDBase)
+	id, err := client.IngestPCAPStream(ctx, cr, captureID, cfg.sensor, packetIDBase, func() { p.packets.Add(1) })
 	stopBar()
 
 	if err != nil {
@@ -413,65 +409,3 @@ func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.L
 	return f, fileSize, captureID, packetIDBase, nil
 }
 
-func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress, packetIDBase uint64) (uuid.UUID, error) {
-	br := bufio.NewReader(r)
-	header := make([]byte, 24)
-	if _, err := io.ReadFull(br, header); err != nil {
-		return uuid.Nil, fmt.Errorf("read pcap header: %w", err)
-	}
-
-	meta, err := caphouse.ParseGlobalHeader(header)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("parse pcap header: %w", err)
-	}
-	meta.CaptureID = captureID
-	meta.SensorID = sensor
-	meta.CreatedAt = time.Now()
-	meta.GlobalHeaderRaw = header
-	meta.CodecVersion = components.CodecVersionV1
-	meta.CodecProfile = components.CodecProfileV1
-
-	capID, err := client.CreateCapture(ctx, meta)
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	reader, err := pcapgo.NewReader(io.MultiReader(bytes.NewReader(header), br))
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("pcap reader: %w", err)
-	}
-
-	var seq uint64
-	for {
-		data, ci, err := reader.ReadPacketData()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("read packet: %w", err)
-		}
-
-		packet := caphouse.Packet{
-			CaptureID: capID,
-			PacketID:  packetIDBase | seq,
-			Timestamp: ci.Timestamp,
-			InclLen:   uint32(ci.CaptureLength),
-			OrigLen:   uint32(ci.Length),
-			Frame:     data,
-		}
-		if err := client.IngestPacket(ctx, meta.LinkType, packet); err != nil {
-			return uuid.Nil, err
-		}
-		seq++
-		p.packets.Add(1)
-	}
-
-	if err := client.Flush(ctx); err != nil {
-		return uuid.Nil, err
-	}
-	if err := client.FinalizeStreams(ctx); err != nil {
-		return uuid.Nil, err
-	}
-
-	return capID, nil
-}
