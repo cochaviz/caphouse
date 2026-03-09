@@ -44,98 +44,84 @@ type tableBytes struct {
 	uncompressed uint64
 }
 
-func TestMain(m *testing.M) {
-	ctx := context.Background()
-
-	ctr, err := clickhouse.Run(ctx, "clickhouse/clickhouse-server:25.3",
-		tccontainers.WithEnv(map[string]string{
-			"CLICKHOUSE_USER":     "default",
-			"CLICKHOUSE_PASSWORD": "default",
-			"CLICKHOUSE_DB":       "caphouse_compression",
-		}),
-	)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "start clickhouse container: %v\n", err)
-		os.Exit(1)
-	}
-
-	dsn, err := ctr.ConnectionString(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "get connection string: %v\n", err)
-		os.Exit(1)
-	}
-
-	compressionClient, err = New(ctx, Config{
-		DSN:       dsn,
-		Database:  "caphouse_compression",
-		BatchSize: 50000,
+func init() {
+	var ctr *clickhouse.ClickHouseContainer
+	var cFile, tFile, pFile *os.File
+	testSetups = append(testSetups, testSetup{
+		setup: func(ctx context.Context) error {
+			var err error
+			ctr, err = clickhouse.Run(ctx, "clickhouse/clickhouse-server:25.3",
+				tccontainers.WithEnv(map[string]string{
+					"CLICKHOUSE_USER":     "default",
+					"CLICKHOUSE_PASSWORD": "default",
+					"CLICKHOUSE_DB":       "caphouse_compression",
+				}),
+			)
+			if err != nil {
+				return fmt.Errorf("start clickhouse container: %w", err)
+			}
+			dsn, err := ctr.ConnectionString(ctx)
+			if err != nil {
+				return fmt.Errorf("get connection string: %w", err)
+			}
+			compressionClient, err = New(ctx, Config{
+				DSN:       dsn,
+				Database:  "caphouse_compression",
+				BatchSize: 50000,
+			})
+			if err != nil {
+				return fmt.Errorf("create client: %w", err)
+			}
+			if err := compressionClient.InitSchema(ctx); err != nil {
+				return fmt.Errorf("init schema: %w", err)
+			}
+			if err := os.MkdirAll("testresults", 0o755); err != nil {
+				return fmt.Errorf("create testresults dir: %w", err)
+			}
+			cFile, err = os.Create("testresults/compression_ratio.csv")
+			if err != nil {
+				return fmt.Errorf("create compression_ratio.csv: %w", err)
+			}
+			compressionCSV = csv.NewWriter(cFile)
+			_ = compressionCSV.Write([]string{
+				"file", "file_bytes",
+				"ref_method", "ref_bytes",
+				"ch_logical_bytes", "ch_compressed_bytes",
+				"ch_vs_file_ratio", "internal_ratio", "vs_ref_ratio",
+			})
+			tFile, err = os.Create("testresults/compression_by_table.csv")
+			if err != nil {
+				return fmt.Errorf("create compression_by_table.csv: %w", err)
+			}
+			tableCSV = csv.NewWriter(tFile)
+			_ = tableCSV.Write([]string{
+				"file", "table",
+				"logical_bytes", "compressed_bytes",
+				"compression_ratio",
+				"pct_of_total_logical", "pct_of_total_compressed",
+			})
+			pFile, err = os.Create("testresults/parse_ratio.csv")
+			if err != nil {
+				return fmt.Errorf("create parse_ratio.csv: %w", err)
+			}
+			parseCSV = csv.NewWriter(pFile)
+			_ = parseCSV.Write([]string{
+				"file", "total_packets", "parsed_packets", "raw_fallback_packets",
+				"parsed_pct", "raw_pct",
+			})
+			return nil
+		},
+		teardown: func() {
+			compressionCSV.Flush()
+			_ = cFile.Close()
+			tableCSV.Flush()
+			_ = tFile.Close()
+			parseCSV.Flush()
+			_ = pFile.Close()
+			_ = compressionClient.Close()
+			_ = ctr.Terminate(context.Background())
+		},
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create client: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := compressionClient.InitSchema(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "init schema: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Open CSV outputs. os.Exit skips deferred functions, so we capture the
-	// exit code from m.Run() and flush/close everything before calling os.Exit.
-	if err := os.MkdirAll("testresults", 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "create testresults dir: %v\n", err)
-		os.Exit(1)
-	}
-
-	cFile, err := os.Create("testresults/compression_ratio.csv")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create compression_ratio.csv: %v\n", err)
-		os.Exit(1)
-	}
-	compressionCSV = csv.NewWriter(cFile)
-	_ = compressionCSV.Write([]string{
-		"file", "file_bytes",
-		"ref_method", "ref_bytes",
-		"ch_logical_bytes", "ch_compressed_bytes",
-		"ch_vs_file_ratio", "internal_ratio", "vs_ref_ratio",
-	})
-
-	tFile, err := os.Create("testresults/compression_by_table.csv")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create compression_by_table.csv: %v\n", err)
-		os.Exit(1)
-	}
-	tableCSV = csv.NewWriter(tFile)
-	_ = tableCSV.Write([]string{
-		"file", "table",
-		"logical_bytes", "compressed_bytes",
-		"compression_ratio",
-		"pct_of_total_logical", "pct_of_total_compressed",
-	})
-
-	pFile, err := os.Create("testresults/parse_ratio.csv")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create parse_ratio.csv: %v\n", err)
-		os.Exit(1)
-	}
-	parseCSV = csv.NewWriter(pFile)
-	_ = parseCSV.Write([]string{
-		"file", "total_packets", "parsed_packets", "raw_fallback_packets",
-		"parsed_pct", "raw_pct",
-	})
-
-	code := m.Run()
-
-	compressionCSV.Flush()
-	_ = cFile.Close()
-	tableCSV.Flush()
-	_ = tFile.Close()
-	parseCSV.Flush()
-	_ = pFile.Close()
-	_ = compressionClient.Close()
-	_ = ctr.Terminate(ctx)
-
-	os.Exit(code)
 }
 
 // storageSnapshot forces a merge and returns per-table byte counts alongside

@@ -17,47 +17,43 @@ import (
 
 var integrationClient *Client
 
-func TestMain(m *testing.M) {
-	ctx := context.Background()
-
-	// CLICKHOUSE_DB tells the ClickHouse image to create the database on startup.
-	ctr, err := clickhouse.Run(ctx, "clickhouse/clickhouse-server:25.3",
-		tccontainers.WithEnv(map[string]string{
-			"CLICKHOUSE_USER":     "default",
-			"CLICKHOUSE_PASSWORD": "default",
-			"CLICKHOUSE_DB":       "caphouse_e2e",
-		}),
-	)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "start clickhouse container: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() { _ = ctr.Terminate(ctx) }()
-
-	dsn, err := ctr.ConnectionString(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "get connection string: %v\n", err)
-		os.Exit(1)
-	}
-
-	integrationClient, err = New(ctx, Config{
-		DSN:      dsn,
-		Database: "caphouse_e2e",
-		// Large batch size so tests control flushing explicitly.
-		BatchSize: 50000,
+func init() {
+	var ctr *clickhouse.ClickHouseContainer
+	testSetups = append(testSetups, testSetup{
+		setup: func(ctx context.Context) error {
+			var err error
+			ctr, err = clickhouse.Run(ctx, "clickhouse/clickhouse-server:25.3",
+				tccontainers.WithEnv(map[string]string{
+					"CLICKHOUSE_USER":     "default",
+					"CLICKHOUSE_PASSWORD": "default",
+					"CLICKHOUSE_DB":       "caphouse_e2e",
+				}),
+			)
+			if err != nil {
+				return fmt.Errorf("start clickhouse container: %w", err)
+			}
+			dsn, err := ctr.ConnectionString(ctx)
+			if err != nil {
+				return fmt.Errorf("get connection string: %w", err)
+			}
+			integrationClient, err = New(ctx, Config{
+				DSN:       dsn,
+				Database:  "caphouse_e2e",
+				BatchSize: 50000,
+			})
+			if err != nil {
+				return fmt.Errorf("create client: %w", err)
+			}
+			if err := integrationClient.InitSchema(ctx); err != nil {
+				return fmt.Errorf("init schema: %w", err)
+			}
+			return nil
+		},
+		teardown: func() {
+			_ = integrationClient.Close()
+			_ = ctr.Terminate(context.Background())
+		},
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create client: %v\n", err)
-		os.Exit(1)
-	}
-	defer integrationClient.Close()
-
-	if err := integrationClient.InitSchema(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "init schema: %v\n", err)
-		os.Exit(1)
-	}
-
-	os.Exit(m.Run())
 }
 
 // TestE2ERoundtrip ingests every PCAP/PCAPng file in testdata/ via

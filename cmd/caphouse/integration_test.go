@@ -157,6 +157,12 @@ func splitPCAP(t *testing.T, data []byte, n int) [][]byte {
 	return results
 }
 
+// ingestPCAPStream is a thin wrapper around the client method that threads an
+// ingestProgress counter through the onPacket callback.
+func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress, base uint64) (uuid.UUID, error) {
+	return client.IngestPCAPStream(ctx, r, captureID, sensor, base, func() { p.packets.Add(1) })
+}
+
 // ingestAll ingests pcapData under captureID using the real CLI ingestPCAPStream.
 func ingestAll(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData []byte, filename string) {
 	t.Helper()
