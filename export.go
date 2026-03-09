@@ -17,15 +17,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type captureMetaRow struct {
-	Endianness      string
-	Snaplen         uint32
-	LinkType        uint32
-	TimeResolution  string
-	GlobalHeaderRaw []byte
-	CaptureStart    time.Time
-}
-
 // CountPackets returns the deduplicated number of packets stored for the given capture.
 func (c *Client) CountPackets(ctx context.Context, captureID uuid.UUID) (int64, error) {
 	query := fmt.Sprintf("SELECT count() FROM %s FINAL WHERE capture_id = ?", c.packetsTable())
@@ -71,29 +62,10 @@ func (c *Client) ExportCaptureBytes(ctx context.Context, captureID uuid.UUID) ([
 	return io.ReadAll(rc)
 }
 
-func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (captureMetaRow, error) {
-	query := fmt.Sprintf("SELECT endianness, snaplen, linktype, time_res, global_header_raw, created_at FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
-
-	var meta captureMetaRow
-	var headerRaw string
-	if err := c.conn.QueryRow(ctx, query, captureID).Scan(
-		&meta.Endianness,
-		&meta.Snaplen,
-		&meta.LinkType,
-		&meta.TimeResolution,
-		&headerRaw,
-		&meta.CaptureStart,
-	); err != nil {
-		return captureMetaRow{}, fmt.Errorf("fetch capture meta: %w", err)
-	}
-	meta.GlobalHeaderRaw = []byte(headerRaw)
-	return meta, nil
-}
-
 // streamCapture writes a PCAP stream to w. If ranges is nil, all packets for
 // the capture are streamed. If non-nil, only packets whose IDs fall within the
 // given ranges are included; ranges must be pre-computed via toRanges.
-func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
+func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
 	// PCAPng full-capture export: write the preserved header + raw block bytes.
 	if meta.TimeResolution == "pcapng" && ranges == nil {
 		return c.streamNgCapture(ctx, meta, captureID, w, packetsWritten)
@@ -133,7 +105,7 @@ func (c *Client) streamCapture(ctx context.Context, meta captureMetaRow, capture
 			return err
 		}
 		for _, row := range batch {
-			ts := meta.CaptureStart.Add(time.Duration(row.tsOffsetNs))
+			ts := meta.CreatedAt.Add(time.Duration(row.tsOffsetNs))
 			nucleus := components.PacketNucleus{
 				CaptureID:  captureID,
 				PacketID:   row.packetID,
@@ -371,34 +343,10 @@ func resolveComponents(
 	return list, nil
 }
 
-func writePCAPHeader(w io.Writer, meta captureMetaRow) error {
-	if len(meta.GlobalHeaderRaw) == 24 {
-		_, err := w.Write(meta.GlobalHeaderRaw)
-		return err
-	}
-	// PCAPng or unknown: write a synthetic classic PCAP LE/µs header so
-	// filtered exports always produce a valid classic PCAP stream.
-	endian := meta.Endianness
-	if endian == "" {
-		endian = "le"
-	}
-	order := byteOrder(endian)
-	var header [24]byte
-	order.PutUint32(header[0:4], 0xA1B2C3D4)
-	order.PutUint16(header[4:6], 2)
-	order.PutUint16(header[6:8], 4)
-	order.PutUint32(header[8:12], 0)
-	order.PutUint32(header[12:16], 0)
-	order.PutUint32(header[16:20], meta.Snaplen)
-	order.PutUint32(header[20:24], meta.LinkType)
-	_, err := w.Write(header[:])
-	return err
-}
-
 // streamNgCapture writes a byte-exact pcapng stream for a full (unfiltered) export.
 // It writes the stored GlobalHeaderRaw (SHB + IDBs) followed by the raw block_raw
 // bytes for each packet in order.
-func (c *Client) streamNgCapture(ctx context.Context, meta captureMetaRow, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
+func (c *Client) streamNgCapture(ctx context.Context, meta CaptureMeta, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
 	buf := bufio.NewWriterSize(w, 128*1024)
 	if _, err := buf.Write(meta.GlobalHeaderRaw); err != nil {
 		return fmt.Errorf("write pcapng header: %w", err)
@@ -472,6 +420,34 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 	}
 }
 
+// writePCAPHeader writes a classic PCAP global header to w. If
+// meta.GlobalHeaderRaw is a valid 24-byte header it is written byte-for-byte;
+// otherwise a synthetic LE/µs header is generated from meta.
+func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
+	if len(meta.GlobalHeaderRaw) == 24 {
+		_, err := w.Write(meta.GlobalHeaderRaw)
+		return err
+	}
+	// PCAPng or unknown: write a synthetic classic PCAP LE/µs header so
+	// filtered exports always produce a valid classic PCAP stream.
+	endian := meta.Endianness
+	if endian == "" {
+		endian = "le"
+	}
+	order := byteOrder(endian)
+	var header [24]byte
+	order.PutUint32(header[0:4], 0xA1B2C3D4)
+	order.PutUint16(header[4:6], 2)
+	order.PutUint16(header[6:8], 4)
+	order.PutUint32(header[8:12], 0)
+	order.PutUint32(header[12:16], 0)
+	order.PutUint32(header[16:20], meta.Snaplen)
+	order.PutUint32(header[20:24], meta.LinkType)
+	_, err := w.Write(header[:])
+	return err
+}
+
+// writePacketRecord writes a single classic PCAP packet record to w.
 func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl uint32, orig uint32, frame []byte) error {
 	if incl != uint32(len(frame)) {
 		incl = uint32(len(frame))
@@ -503,4 +479,3 @@ func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl u
 	}
 	return nil
 }
-

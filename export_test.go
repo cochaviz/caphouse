@@ -47,15 +47,8 @@ func TestPCAPExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse header: %v", err)
 	}
-	metaRow := captureMetaRow{
-		Endianness:     meta.Endianness,
-		Snaplen:        meta.Snaplen,
-		LinkType:       meta.LinkType,
-		TimeResolution: meta.TimeResolution,
-	}
-
 	var output bytes.Buffer
-	if err := writePCAPHeader(&output, metaRow); err != nil {
+	if err := writePCAPHeader(&output, meta); err != nil {
 		t.Fatalf("write output header: %v", err)
 	}
 
@@ -63,7 +56,7 @@ func TestPCAPExportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read input: %v", err)
 	}
-	order := byteOrder(metaRow.Endianness)
+	order := byteOrder(meta.Endianness)
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if err == io.EOF {

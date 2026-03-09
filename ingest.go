@@ -53,31 +53,20 @@ func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uuid.UUID
 		return uuid.Nil, fmt.Errorf("check capture: %w", err)
 	}
 
-	rawHeader := meta.GlobalHeaderRaw
-	if rawHeader == nil {
-		rawHeader = []byte{}
+	cols, err := meta.ClickhouseColumns()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("capture columns: %w", err)
 	}
-
-	insert := fmt.Sprintf(`INSERT INTO %s
-(capture_id, sensor_id, created_at, endianness, snaplen, linktype, time_res, global_header_raw, codec_version, codec_profile)
-VALUES`, c.capturesTable())
-
+	insert := fmt.Sprintf("INSERT INTO %s (%s) VALUES", c.capturesTable(), strings.Join(cols, ", "))
 	capBatch, err := c.conn.PrepareBatch(ctx, insert)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("prepare capture batch: %w", err)
 	}
-	if err := capBatch.Append(
-		meta.CaptureID,
-		meta.SensorID,
-		meta.CreatedAt,
-		meta.Endianness,
-		meta.Snaplen,
-		meta.LinkType,
-		meta.TimeResolution,
-		rawHeader,
-		meta.CodecVersion,
-		meta.CodecProfile,
-	); err != nil {
+	vals, err := meta.ClickhouseValues()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("capture values: %w", err)
+	}
+	if err := capBatch.Append(vals...); err != nil {
 		return uuid.Nil, fmt.Errorf("append capture: %w", err)
 	}
 	if err := capBatch.Send(); err != nil {

@@ -24,23 +24,6 @@ type Config struct {
 	DisableStreamTracking bool
 }
 
-// CaptureMeta describes one stored capture's global metadata.
-type CaptureMeta struct {
-	CaptureID      uuid.UUID
-	SensorID       string
-	CreatedAt      time.Time
-	Snaplen        uint32
-	LinkType       uint32 // DLT, for Ethernet use 1
-	Endianness     string // "le" or "be"
-	TimeResolution string // "us" or "ns" for classic pcap; "pcapng" for pcapng format
-	IsPcapNG       bool   // true when the source file is pcapng format
-
-	GlobalHeaderRaw []byte // optional 24-byte classic pcap header
-
-	CodecVersion uint16
-	CodecProfile string
-}
-
 // PacketNucleus is an alias of the component nucleus type.
 type PacketNucleus = components.PacketNucleus
 
@@ -61,4 +44,13 @@ type CodecPacket struct {
 	// BlockRaw holds the raw pcapng EPB/SPB bytes for byte-exact re-export.
 	// Empty for classic PCAP packets.
 	BlockRaw []byte
+}
+
+// ClickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns
+// for any type that is stored in ClickHouse.
+type ClickhouseMapper interface {
+	Table() string
+	ClickhouseColumns() ([]string, error)
+	ClickhouseValues() ([]any, error)
+	ScanColumns() []string
 }

@@ -143,17 +143,10 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 		return out.Bytes(), nil
 	}
 
-	metaRow := captureMetaRow{
-		Endianness:      m.meta.Endianness,
-		Snaplen:         m.meta.Snaplen,
-		LinkType:        m.meta.LinkType,
-		TimeResolution:  m.meta.TimeResolution,
-		GlobalHeaderRaw: m.meta.GlobalHeaderRaw,
-	}
-	if err := writePCAPHeader(&out, metaRow); err != nil {
+	if err := writePCAPHeader(&out, m.meta); err != nil {
 		return nil, err
 	}
-	order := byteOrder(metaRow.Endianness)
+	order := byteOrder(m.meta.Endianness)
 	for _, p := range pkts {
 		if err := writePacketRecord(&out, order, p.Timestamp, p.InclLen, p.OrigLen, p.Frame); err != nil {
 			return nil, err
