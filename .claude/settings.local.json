@@ -5,7 +5,8 @@
       "Read(//root/go/pkg/mod/github.com/**)",
       "Read(//root/go/pkg/mod/github.com/google/gopacket@v1.1.19/**)",
       "Bash(go test -v -tags integration -timeout 300s 2>&1)",
-      "Bash(go test -v -tags integration -run TestTimestampPrecision -timeout 120s 2>&1 | tail -15)"
+      "Bash(go test -v -tags integration -run TestTimestampPrecision -timeout 120s 2>&1 | tail -15)",
+      "Bash(go:*)"
     ]
   }
 }

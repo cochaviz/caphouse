@@ -1,8 +1,9 @@
+//go:build integration
+
 package caphouse
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -38,10 +39,6 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 			}
 
 			meta, err := ParseGlobalHeader(input[:24])
-			if errors.Is(err, ErrPcapNG) {
-				testPcapNgRoundTrip(t, input)
-				return
-			}
 			if err != nil {
 				t.Fatalf("parse global header: %v", err)
 			}
@@ -64,28 +61,6 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 				t.Fatalf("pcap bytes mismatch")
 			}
 		})
-	}
-}
-
-// testPcapNgRoundTrip verifies byte-exact roundtrip for pcapng files using
-// ReadNgRaw: the reconstructed file (headerRaw + all block_raws) must equal
-// the original input byte-for-byte.
-func testPcapNgRoundTrip(t *testing.T, input []byte) {
-	t.Helper()
-
-	_, headerRaw, packets, err := ReadNgRaw(bytes.NewReader(input))
-	if err != nil {
-		t.Fatalf("ReadNgRaw: %v", err)
-	}
-
-	var reconstructed []byte
-	reconstructed = append(reconstructed, headerRaw...)
-	for _, p := range packets {
-		reconstructed = append(reconstructed, p.BlockRaw...)
-	}
-
-	if !bytes.Equal(reconstructed, input) {
-		t.Fatalf("pcapng bytes not byte-exact after ReadNgRaw (got %d bytes, want %d)", len(reconstructed), len(input))
 	}
 }
 

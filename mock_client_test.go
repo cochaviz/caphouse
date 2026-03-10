@@ -93,7 +93,12 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 	}
 	sort.Slice(packetIDs, func(i, j int) bool { return packetIDs[i] < packetIDs[j] })
 
-	var pkts []NgPacket
+	var out bytes.Buffer
+	if err := writePCAPHeader(&out, m.meta); err != nil {
+		return nil, err
+	}
+	order := byteOrder(m.meta.Endianness)
+
 	for _, id := range packetIDs {
 		nucleus := m.packets[id]
 		componentsList := []components.Component{}
@@ -132,23 +137,7 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct packet %d: %w", id, err)
 		}
-		pkts = append(pkts, NgPacket{nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame})
-	}
-
-	var out bytes.Buffer
-	if m.meta.IsPcapNG {
-		if err := WriteNgPackets(&out, m.meta.LinkType, pkts); err != nil {
-			return nil, err
-		}
-		return out.Bytes(), nil
-	}
-
-	if err := writePCAPHeader(&out, m.meta); err != nil {
-		return nil, err
-	}
-	order := byteOrder(m.meta.Endianness)
-	for _, p := range pkts {
-		if err := writePacketRecord(&out, order, p.Timestamp, p.InclLen, p.OrigLen, p.Frame); err != nil {
+		if err := writePacketRecord(&out, order, nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame); err != nil {
 			return nil, err
 		}
 	}

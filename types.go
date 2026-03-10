@@ -41,9 +41,6 @@ type Packet struct {
 type CodecPacket struct {
 	Nucleus    PacketNucleus
 	Components []components.Component
-	// BlockRaw holds the raw pcapng EPB/SPB bytes for byte-exact re-export.
-	// Empty for classic PCAP packets.
-	BlockRaw []byte
 }
 
 // ClickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns

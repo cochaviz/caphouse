@@ -8,8 +8,7 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   trunc_extra UInt32          CODEC(ZSTD(9)),
   components  UInt128,
   frame_raw   String          CODEC(ZSTD(3)),
-  frame_hash  FixedString(32) CODEC(ZSTD),
-  block_raw   String          CODEC(ZSTD(3))
+  frame_hash  FixedString(32) CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id)

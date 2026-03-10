@@ -162,7 +162,7 @@ func (c *Client) insertBatch(ctx context.Context, batch []CodecPacket) error {
 	}
 
 	nucleusInsert := fmt.Sprintf(`INSERT INTO %s
-(capture_id, packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash, block_raw)
+(capture_id, packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash)
 VALUES`, c.packetsTable())
 
 	nucleusBatch, err := c.conn.PrepareBatch(ctx, nucleusInsert)
@@ -181,10 +181,6 @@ VALUES`, c.packetsTable())
 		if d := p.Nucleus.Timestamp.Sub(captureStart); d > 0 {
 			tsOffsetNs = uint64(d.Nanoseconds())
 		}
-		blockRaw := p.BlockRaw
-		if blockRaw == nil {
-			blockRaw = []byte{}
-		}
 		if err := nucleusBatch.Append(
 			p.Nucleus.CaptureID,
 			p.Nucleus.PacketID,
@@ -194,7 +190,6 @@ VALUES`, c.packetsTable())
 			p.Nucleus.Components,
 			p.Nucleus.FrameRaw,
 			p.Nucleus.FrameHash,
-			blockRaw,
 		); err != nil {
 			return fmt.Errorf("append nucleus: %w", err)
 		}
@@ -295,7 +290,8 @@ func (c *Client) IngestPCAPStream(
 }
 
 // ingestNgStream handles the pcapng path for IngestPCAPStream.
-// It uses ReadNgRaw so that raw block bytes are preserved for byte-exact export.
+// Packets are extracted and stored as classic PCAP; pcapng-specific blocks
+// (SHB, IDB, NRB, ISB, …) are discarded and the capture exports as PCAP.
 func (c *Client) ingestNgStream(
 	ctx context.Context,
 	r io.Reader,
@@ -304,54 +300,13 @@ func (c *Client) ingestNgStream(
 	packetIDBase uint64,
 	onPacket func(),
 ) (uuid.UUID, error) {
-	meta, headerRaw, rawPackets, err := ReadNgRaw(r)
+	meta, ngr, err := ParseNgCaptureMeta(r)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	meta.CaptureID = captureID
 	meta.SensorID = sensor
-	meta.GlobalHeaderRaw = headerRaw
-
-	if len(rawPackets) == 0 {
-		meta.CreatedAt = time.Now()
-		capID, err := c.CreateCapture(ctx, meta)
-		if err != nil {
-			return uuid.Nil, err
-		}
-		if err := c.Flush(ctx); err != nil {
-			return uuid.Nil, err
-		}
-		return capID, c.FinalizeStreams(ctx)
-	}
-
-	meta.CreatedAt = rawPackets[0].Timestamp
-	capID, err := c.CreateCapture(ctx, meta)
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	for i, rp := range rawPackets {
-		encoded := EncodePacket(meta.LinkType, Packet{
-			CaptureID: capID,
-			PacketID:  packetIDBase | uint64(i),
-			Timestamp: rp.Timestamp,
-			InclLen:   rp.InclLen,
-			OrigLen:   rp.OrigLen,
-			Frame:     rp.Frame,
-		})
-		encoded.BlockRaw = rp.BlockRaw
-		if err := c.appendToBatch(ctx, encoded); err != nil {
-			return uuid.Nil, err
-		}
-		if onPacket != nil {
-			onPacket()
-		}
-	}
-
-	if err := c.Flush(ctx); err != nil {
-		return uuid.Nil, err
-	}
-	return capID, c.FinalizeStreams(ctx)
+	return c.ingestPackets(ctx, meta, ngr, packetIDBase, onPacket)
 }
 
 // packetReader is satisfied by both pcapgo.Reader and pcapgo.NgReader.

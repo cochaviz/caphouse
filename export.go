@@ -66,16 +66,15 @@ func (c *Client) ExportCaptureBytes(ctx context.Context, captureID uuid.UUID) ([
 // the capture are streamed. If non-nil, only packets whose IDs fall within the
 // given ranges are included; ranges must be pre-computed via toRanges.
 func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
-	// PCAPng full-capture export: write the preserved header + raw block bytes.
-	if meta.TimeResolution == "pcapng" && ranges == nil {
-		return c.streamNgCapture(ctx, meta, captureID, w, packetsWritten)
-	}
-
 	buf := bufio.NewWriterSize(w, 128*1024)
+	if len(meta.GlobalHeaderRaw) != 24 {
+		c.log.Warn("exporting capture with synthetic PCAP header: original was pcapng or header was not preserved; output may differ from source",
+			"capture_id", captureID)
+	}
 	if err := writePCAPHeader(buf, meta); err != nil {
 		return err
 	}
-	if ranges != nil && len(ranges) == 0 {
+	if len(ranges) == 0 && ranges != nil {
 		return buf.Flush()
 	}
 
@@ -343,43 +342,6 @@ func resolveComponents(
 	return list, nil
 }
 
-// streamNgCapture writes a byte-exact pcapng stream for a full (unfiltered) export.
-// It writes the stored GlobalHeaderRaw (SHB + IDBs) followed by the raw block_raw
-// bytes for each packet in order.
-func (c *Client) streamNgCapture(ctx context.Context, meta CaptureMeta, captureID uuid.UUID, w io.Writer, packetsWritten *atomic.Int64) error {
-	buf := bufio.NewWriterSize(w, 128*1024)
-	if _, err := buf.Write(meta.GlobalHeaderRaw); err != nil {
-		return fmt.Errorf("write pcapng header: %w", err)
-	}
-
-	query := fmt.Sprintf(
-		"SELECT block_raw FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC",
-		c.packetsTable(),
-	)
-	rows, err := c.conn.Query(ctx, query, captureID)
-	if err != nil {
-		return fmt.Errorf("query packets: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var blockRaw string
-		if err := rows.Scan(&blockRaw); err != nil {
-			return fmt.Errorf("scan block_raw: %w", err)
-		}
-		if _, err := buf.Write([]byte(blockRaw)); err != nil {
-			return fmt.Errorf("write block_raw: %w", err)
-		}
-		if packetsWritten != nil {
-			packetsWritten.Add(1)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate packets: %w", err)
-	}
-	return buf.Flush()
-}
-
 func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.Component) {
 	c.log.Debug("packet reconstruction failed",
 		"capture_id", captureID,
@@ -422,14 +384,12 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 
 // writePCAPHeader writes a classic PCAP global header to w. If
 // meta.GlobalHeaderRaw is a valid 24-byte header it is written byte-for-byte;
-// otherwise a synthetic LE/µs header is generated from meta.
+// otherwise a synthetic LE/µs header is generated from meta fields.
 func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
 	if len(meta.GlobalHeaderRaw) == 24 {
 		_, err := w.Write(meta.GlobalHeaderRaw)
 		return err
 	}
-	// PCAPng or unknown: write a synthetic classic PCAP LE/µs header so
-	// filtered exports always produce a valid classic PCAP stream.
 	endian := meta.Endianness
 	if endian == "" {
 		endian = "le"
