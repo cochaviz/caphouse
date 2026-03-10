@@ -1,4 +1,4 @@
-//go:build integration || compression
+//go:build e2e || compression
 
 package caphouse
 

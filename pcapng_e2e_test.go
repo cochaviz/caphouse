@@ -1,0 +1,63 @@
+//go:build e2e
+
+package caphouse
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/google/gopacket/pcapgo"
+	"github.com/google/uuid"
+)
+
+// TestE2EPcapNgCompat verifies that pcapng files can be ingested without error
+// and that the result is a valid classic PCAP stream. No byte-exact guarantee
+// is made — the pcapng format is converted on ingest and metadata blocks are
+// discarded.
+func TestE2EPcapNgCompat(t *testing.T) {
+	ctx := context.Background()
+	paths, err := filepath.Glob("testdata/*.pcapng")
+	if err != nil {
+		t.Fatalf("glob testdata: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Skip("no pcapng files found in testdata/; skipping")
+	}
+
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+
+			// ParseGlobalHeader must signal pcapng format.
+			if len(data) < 24 {
+				t.Fatalf("%s too short", path)
+			}
+			_, err = ParseGlobalHeader(data[:24])
+			if !errors.Is(err, ErrPcapNG) {
+				t.Fatalf("expected ErrPcapNG, got %v", err)
+			}
+
+			// IngestPCAPStream must succeed (handles pcapng internally).
+			captureID, err := integrationClient.IngestPCAPStream(ctx, bytes.NewReader(data), uuid.New(), "test", 0, nil)
+			if err != nil {
+				t.Fatalf("IngestPCAPStream: %v", err)
+			}
+
+			// Exported bytes must be a valid classic PCAP stream.
+			out, err := integrationClient.ExportCaptureBytes(ctx, captureID)
+			if err != nil {
+				t.Fatalf("ExportCaptureBytes: %v", err)
+			}
+			if _, err := pcapgo.NewReader(bytes.NewReader(out)); err != nil {
+				t.Fatalf("exported bytes are not valid PCAP: %v", err)
+			}
+		})
+	}
+}
