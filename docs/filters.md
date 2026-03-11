@@ -27,6 +27,28 @@ not port 22
 time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z
 ```
 
+## Querying across all captures
+
+Pass `-c all` (or `--capture all`) instead of a specific UUID to run the filter
+against every stored capture. A `time` primitive is **required** when using
+`-c all`:
+
+```sh
+# Export matching packets from all captures in a one-hour window
+caphouse -w -d "..." -c all \
+  -q "time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z and host 10.0.0.1" \
+  merged.pcap
+
+# Generate SQL spanning all captures
+caphouse -d "..." -c all \
+  -q "time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z" \
+  | clickhouse-client --multiquery
+```
+
+The exported PCAP contains packets in strict time order (ties broken by capture
+start time, then capture UUID). A warning is emitted when the merged output
+contains captures with different link types.
+
 ## Generated SQL
 
 Without `--components`:

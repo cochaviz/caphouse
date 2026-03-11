@@ -1,7 +1,7 @@
 # caphouse
 
 caphouse stores classic PCAP files in ClickHouse achieving high compression and
-fast query performance. 
+fast query performance.
 
 Traditionally, PCAPs are stored on disk and compressed using a variety of
 methods, such as gzip. This is difficult to query remotely; the workaround is to
@@ -24,10 +24,14 @@ Read more about how it works, and get started by following the documentation:
 
 - **Ingest classic PCAP and PCAPng** — both formats are accepted; PCAPng is
   converted to classic PCAP on ingest with packet data fully preserved.
+- **Multi-file ingest** — pass multiple files or glob patterns as positional
+  arguments to ingest them in one command (e.g. `caphouse -d "..." ring*.pcap`).
 - **Byte-exact export** — classic PCAP captures can be exported bit-for-bit to
   the original file.
 - **BPF-style filtering** — filter on host, port, protocol, and time range
   using a familiar tcpdump-like syntax; results stream directly as PCAP.
+- **Cross-capture export** — use `--capture all` with a time-range filter to
+  merge packets from every capture into a single time-sorted PCAP stream.
 - **SQL query generation** — the same filter expression can be rendered as a
   ClickHouse `SELECT` statement for direct inspection or further customisation.
 - **~5x compression** — columnar storage and per-field codecs compress a
@@ -63,18 +67,21 @@ caphouse --version
 Assuming you have a ClickHouse (native protocol, not HTTP:
 <https://clickhouse.com/docs/interfaces/overview>) instance running on
 `localhost:9000` with user `default`, password `default` and access to the
-`default` database, you can use `caphouse` for PCAP storage as follows: 
+`default` database, you can use `caphouse` for PCAP storage as follows:
 
 ```sh
 # Ingest (spits out the capture_id once finished)
 # DSN has the format clickhouse://<user>:<password>@<host>:<port>/<database>
-caphouse -d "clickhouse://default:default@localhost:9000/default" -f capture.pcap
+caphouse -d "clickhouse://default:default@localhost:9000/default" capture.pcap
+
+# Ingest multiple files or a glob
+caphouse -d "..." ring*.pcap
 
 # Export
-caphouse -w -d "..." -c "<capture_id>" -f out.pcap
+caphouse -w -d "..." -c "<capture_id>" out.pcap
 
 # Filter and export
-caphouse -w -d "..." -c "<capture_id>" -q "host 10.0.0.1 and port 443" -f filtered.pcap
+caphouse -w -d "..." -c "<capture_id>" -q "host 10.0.0.1 and port 443" filtered.pcap
 ```
 
 More usage examples can be found in the
@@ -89,6 +96,17 @@ generate a SQL query and pipe it to `clickhouse-client`:
 caphouse -q "host 10.0.0.1 and port 443" -c "<capture_id>" | clickhouse-client
 ```
 
+Use `--capture all` with a time-range filter to query or export across every
+capture at once:
+
+```sh
+# Export all captures within a time window, merged and sorted by time
+caphouse -w -d "..." -c all -q "time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z" merged.pcap
+
+# Generate SQL spanning all captures
+caphouse -q "host 10.0.0.1 and time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z" -c all | clickhouse-client
+```
+
 For more details on filters and querying, see the
 [documentation](https://cochaviz.com/caphouse/filters/).
 
@@ -98,7 +116,7 @@ By default, `caphouse` uses `stdin` for input and `stdout` for output, meaning
 you can pipe PCAP data directly to `caphouse` with `tcpdump`:
 
 ```sh
-tcpdump -i eth0 -w - | caphouse -d "..." -f - 
+tcpdump -i eth0 -w - | caphouse -d "..."
 ```
 
 Because of `caphouse`'s retry mechanism, you can use `tcpdump`'s ring buffers

@@ -15,6 +15,51 @@ understand.
 
 todo...
 
+## Public Library API
+
+The `caphouse` package exposes a small set of methods on `*Client` that are
+suitable for use outside the CLI.
+
+### `IngestPCAPStream`
+
+```go
+func (c *Client) IngestPCAPStream(ctx context.Context, r io.Reader, meta CaptureMeta) error
+```
+
+Transparently handles both classic PCAP and PCAPng input. Parses each packet
+into its protocol layers and writes them to ClickHouse. Use this as the single
+entry point for stream-based ingest.
+
+### `ExportAllCapturesFiltered`
+
+```go
+func (c *Client) ExportAllCapturesFiltered(
+    ctx context.Context,
+    f Query,
+    packetsWritten *atomic.Int64,
+) (rc io.ReadCloser, total int64, err error)
+```
+
+Merges packets from every stored capture that match `f` into a single
+time-sorted PCAP stream. `f` must contain a `time` primitive; an error is
+returned otherwise. `packetsWritten` is incremented after each packet (may be
+nil). Returns the total matched packet count alongside the reader so callers
+can use it for progress reporting.
+
+### `GenerateSQLForCaptures`
+
+```go
+func (c *Client) GenerateSQLForCaptures(
+    captureIDs []uuid.UUID,
+    q Query,
+    components []string,
+) (string, error)
+```
+
+Like `GenerateSQL` but accepts a list of capture IDs. Pass `nil` (or an empty
+slice) to generate a `SELECT` statement that spans all captures without an
+explicit `capture_id IN (...)` predicate.
+
 ## Running Tests
 
 The test suite is split into three tiers, each with its own build tag:
