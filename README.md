@@ -22,28 +22,28 @@ Read more about how it works, and get started by following the documentation:
 
 ## Features
 
-- **Ingest classic PCAP and PCAPng** — both formats are accepted; PCAPng is
-  converted to classic PCAP on ingest with packet data fully preserved.
-- **Multi-file ingest** — pass multiple files or glob patterns as positional
-  arguments to ingest them in one command (e.g. `caphouse -d "..." ring*.pcap`).
-- **Byte-exact export** — classic PCAP captures can be exported bit-for-bit to
-  the original file.
-- **BPF-style filtering** — filter on host, port, protocol, and time range
-  using a familiar tcpdump-like syntax; results stream directly as PCAP.
-- **Cross-capture export** — use `--capture all` with a time-range filter to
-  merge packets from every capture into a single time-sorted PCAP stream.
-- **SQL query generation** — the same filter expression can be rendered as a
-  ClickHouse `SELECT` statement for direct inspection or further customisation.
 - **~5x compression** — columnar storage and per-field codecs compress a
   typical SYN-flood capture from 174 MB to 35 MB, approaching `xz -9` while
   keeping the data fully queryable.
+- **BPF-style filtering** — filter on host, port, protocol, and time range
+  using a familiar tcpdump-like syntax; results stream directly as PCAP.
+- **SQL query generation** — the same filter expression can be rendered as a
+  ClickHouse `SELECT` statement for direct inspection or further customisation.
 - **Lossless reconstruction** — every bit of every frame is preserved; packets
   that cannot be parsed fall back to raw frame storage.
+- **Byte-exact export** — classic PCAP captures can be exported bit-for-bit to
+  the original file.
+- **Cross-capture export** — use `--capture all` with a time-range filter to
+  merge packets from every capture into a single time-sorted PCAP stream.
 - **At-least-once delivery** — batch retries with exponential backoff and
   `ReplacingMergeTree`-based deduplication mean re-ingesting a file is always
   safe.
 - **Continuous capture** — `caphouse-monitor` wraps tcpdump ring-buffer
   rotation with automatic ingest, keeping disk usage bounded.
+- **Ingest classic PCAP and PCAPng** — both formats are accepted; PCAPng is
+  converted to classic PCAP on ingest with packet data fully preserved.
+- **Multi-file ingest** — pass multiple files or glob patterns as positional
+  arguments to ingest them in one command (e.g. `caphouse -d "..." ring*.pcap`).
 
 ## Install
 
