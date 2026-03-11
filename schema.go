@@ -44,6 +44,22 @@ func (c *Client) InitSchema(ctx context.Context) error {
 		return fmt.Errorf("create packets table: %w", err)
 	}
 
+	// Schema migrations: bring existing installations up to date. These are
+	// no-ops when the column is already the correct type (e.g. fresh installs),
+	// and only rewrite data on tables created by an older version of caphouse.
+	captureMigrations := []string{
+		// Raise created_at precision from DateTime64(3) to DateTime64(9).
+		fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN created_at DateTime64(9)", capturesTable),
+		// Widen time_res from Enum8('us'=1) to LowCardinality(String) to
+		// accommodate the new "ns" value introduced with PCAPng support.
+		fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN time_res LowCardinality(String)", capturesTable),
+	}
+	for _, stmt := range captureMigrations {
+		if err := c.conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("migrate captures table: %w", err)
+		}
+	}
+
 	for _, ctor := range components.ComponentFactories {
 		proto := ctor()
 		table := c.tableRef(proto.Table())

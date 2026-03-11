@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - `captures_schema.sql`: `created_at` precision raised from `DateTime64(3)` to
   `DateTime64(9)` (nanosecond); `time_res` column changed from
   `Enum8('us' = 1)` to `LowCardinality(String)` to accommodate `"ns"` captures.
+  **Existing installations:** `InitSchema` now automatically applies these column
+  changes via `ALTER TABLE MODIFY COLUMN`, so no manual migration is required.
 - `CreatedAt` on a capture is now derived from the first packet's timestamp
   rather than the wall-clock time at ingest start.
 - A `Warn`-level log is emitted when exporting a capture whose original PCAP
