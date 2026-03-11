@@ -4,32 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### New Features
-
-- **Multi-file ingest** — input files are now positional arguments; multiple
-  files and glob patterns are accepted in a single invocation (e.g.
-  `caphouse -d "..." ring*.pcap`). The `--file` / `-f` flag has been removed.
-- **Cross-capture export (`--capture all`)** — pass `-c all` with a mandatory
-  `time <from> to <to>` filter to merge packets from every stored capture into
-  a single time-sorted PCAP stream. Ties are broken by capture start time, then
-  capture ID. A warning is emitted when captures have mixed link types.
-- **`ExportAllCapturesFiltered` library API** — new `*Client` method for
-  cross-capture filtered export; returns an `io.ReadCloser` and total packet
-  count. Requires a query containing a `time` primitive.
-- **`GenerateSQLForCaptures` library API** — like `GenerateSQL` but accepts
-  `[]uuid.UUID`; pass `nil` to generate SQL spanning all captures without an
-  explicit capture filter.
-- **`--no-streams` flag** — disables TCP stream tracking and L7 protocol
-  detection during ingest. Useful for high-throughput scenarios where stream
-  reassembly is not required.
-
-### Changes
-
-- `-c all` is now valid in write (`-w`) and query (`-q`) modes.
-- SQL subqueries for cross-capture queries omit the `capture_id IN (...)` clause
-  entirely when operating over all captures, avoiding a pre-fetch round-trip.
-- `timeNode` subqueries add a `PREWHERE` clause on the captures join for
-  ClickHouse granule-level pruning, improving time-range query performance.
+## [v0.3.0] - 2026-03-11
 
 ### New Features
 
@@ -37,13 +12,43 @@ All notable changes to this project will be documented in this file.
   to classic PCAP on ingest. All non-packet blocks (metadata, interface
   descriptions, etc.) are discarded. No byte-exact round-trip is guaranteed for
   PCAPng sources; the exported result is always a valid classic PCAP stream.
-- **`IngestPCAPStream` promoted to library API** — previously an internal CLI
-  helper, it is now a public method on `*Client`. It transparently handles both
+- **Multi-file ingest** — input files are now positional arguments; multiple
+  files and glob patterns are accepted in a single invocation (e.g.
+  `caphouse -d "..." ring*.pcap`). The `--file` / `-f` flag has been removed.
+- **Cross-capture export (`--capture all`)** — pass `-c all` with a mandatory
+  `time <from> to <to>` filter to merge packets from every stored capture into
+  a single time-sorted PCAP stream. Ties are broken by capture start time, then
+  capture ID. A warning is emitted when captures have mixed link types.
+- **L7 protocol parsing** — DNS, NTP, and HTTP are parsed and stored per packet;
+  TCP stream reassembly enables HTTP reconstruction across multiple packets.
+- **`--no-streams` flag** — disables TCP stream tracking and L7 protocol
+  detection during ingest. Useful for high-throughput scenarios where stream
+  reassembly is not required.
+- **Documentation site** — full MkDocs-based documentation published at
+  <https://cochaviz.github.io/caphouse/>, covering quickstart, filter syntax,
+  storage internals, and a complete flag reference.
+
+### Library API
+
+- **`IngestPCAPStream`** promoted to public API — previously an internal CLI
+  helper, it is now a public method on `*Client`. Transparently handles both
   classic PCAP and PCAPng input and is the single entry point for stream-based
   ingest.
+- **`ExportAllCapturesFiltered`** — new `*Client` method for cross-capture
+  filtered export; returns an `io.ReadCloser` and total packet count. Requires
+  a query containing a `time` primitive.
+- **`GenerateSQLForCaptures`** — like `GenerateSQL` but accepts `[]uuid.UUID`;
+  pass `nil` to generate SQL spanning all captures without an explicit capture
+  filter.
 
 ### Changes
 
+- `-c all` is valid in write (`-w`) and query (`-q`) modes; forbidden in read
+  (`-r`) mode.
+- SQL subqueries for cross-capture queries omit the `capture_id IN (...)` clause
+  entirely when operating over all captures, avoiding a pre-fetch round-trip.
+- `timeNode` subqueries add a `PREWHERE` clause on the captures join for
+  ClickHouse granule-level pruning, improving time-range query performance.
 - `captures_schema.sql`: `created_at` precision raised from `DateTime64(3)` to
   `DateTime64(9)` (nanosecond); `time_res` column changed from
   `Enum8('us' = 1)` to `LowCardinality(String)` to accommodate `"ns"` captures.
@@ -52,6 +57,7 @@ All notable changes to this project will be documented in this file.
 - A `Warn`-level log is emitted when exporting a capture whose original PCAP
   global header was not preserved (i.e. any pcapng-sourced capture), indicating
   that the exported header is synthetic.
+- Component interface simplified; `RawTailComponent` removed.
 
 ### Testing
 
