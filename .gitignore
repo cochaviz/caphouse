@@ -7,3 +7,9 @@ testdata/
 build/
 man/
 completions/
+
+# agents
+.claude/
+
+# dev
+.zed/

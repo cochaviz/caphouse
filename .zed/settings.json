@@ -1,9 +1,0 @@
-{
-  "lsp": {
-    "gopls": {
-      "initialization_options": {
-        "buildFlags": ["-tags=integration,e2e,compression"]
-      }
-    }
-  }
-}
