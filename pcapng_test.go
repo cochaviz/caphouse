@@ -1,0 +1,30 @@
+package caphouse
+
+import (
+	"errors"
+	"testing"
+)
+
+// TestPcapNGDetection verifies that ParseGlobalHeader returns ErrPcapNG for
+// pcapng magic bytes and succeeds for classic PCAP magic bytes.
+func TestPcapNGDetection(t *testing.T) {
+	// pcapng SHB block type magic (little-endian block type 0x0A0D0D0A)
+	pcapngMagic := []byte{0x0A, 0x0D, 0x0D, 0x0A, 0x00, 0x00, 0x00, 0x1C,
+		0x1A, 0x2B, 0x3C, 0x4D, 0x01, 0x00, 0x00, 0x00,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+
+	_, err := ParseGlobalHeader(pcapngMagic)
+	if !errors.Is(err, ErrPcapNG) {
+		t.Fatalf("expected ErrPcapNG for pcapng magic, got %v", err)
+	}
+
+	// Classic PCAP magic (little-endian)
+	classicMagic := []byte{0xD4, 0xC3, 0xB2, 0xA1, 0x02, 0x00, 0x04, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0xFF, 0xFF, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}
+
+	_, err = ParseGlobalHeader(classicMagic)
+	if err != nil {
+		t.Fatalf("unexpected error for classic PCAP magic: %v", err)
+	}
+}

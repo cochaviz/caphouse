@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **PCAPng ingest support** — PCAPng files are accepted as input and converted
+  to classic PCAP on ingest. All non-packet blocks (metadata, interface
+  descriptions, etc.) are discarded. No byte-exact round-trip is guaranteed for
+  PCAPng sources; the exported result is always a valid classic PCAP stream.
+- **`IngestPCAPStream` promoted to library API** — previously an internal CLI
+  helper, it is now a public method on `*Client`. It transparently handles both
+  classic PCAP and PCAPng input and is the single entry point for stream-based
+  ingest.
+
+### Changes
+
+- `captures_schema.sql`: `created_at` precision raised from `DateTime64(3)` to
+  `DateTime64(9)` (nanosecond); `time_res` column changed from
+  `Enum8('us' = 1)` to `LowCardinality(String)` to accommodate `"ns"` captures.
+- `CreatedAt` on a capture is now derived from the first packet's timestamp
+  rather than the wall-clock time at ingest start.
+- A `Warn`-level log is emitted when exporting a capture whose original PCAP
+  global header was not preserved (i.e. any pcapng-sourced capture), indicating
+  that the exported header is synthetic.
+
+### Testing
+
+- Test suite reorganised into three explicit tiers:
+  - **Unit** (`*_test.go`, no build tag) — pure in-memory, no files, no external dependencies.
+  - **Integration** (`*_integration_test.go`, `//go:build integration`) — uses `testdata/` fixtures with the mock client; no container required.
+  - **E2E** (`*_e2e_test.go`, `//go:build e2e`) — requires a running ClickHouse container via testcontainers.
+
 ## [v0.2.0] - 2026-03-07
 
 ### New Features

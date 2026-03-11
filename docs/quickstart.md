@@ -16,6 +16,11 @@ caphouse -d "..." -f more.pcap -c <uuid>
 
 The schema is created automatically on the first ingest.
 
+PCAPng files (`.pcapng`) are also accepted. They are converted to classic PCAP
+on ingest — non-packet blocks are discarded and the exported result is always a
+valid classic PCAP stream. No byte-exact round-trip is guaranteed for PCAPng
+sources.
+
 ## 2. Export a PCAP
 
 ```sh

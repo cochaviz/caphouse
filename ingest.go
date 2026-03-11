@@ -1,10 +1,13 @@
 package caphouse
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/rand/v2"
 	"strings"
@@ -12,6 +15,8 @@ import (
 
 	"caphouse/components"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcapgo"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
 )
@@ -40,35 +45,36 @@ func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uuid.UUID
 		meta.CodecProfile = components.CodecProfileV1
 	}
 
-	query := fmt.Sprintf("SELECT capture_id FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
+	query := fmt.Sprintf("SELECT capture_id, created_at FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
 	var existing uuid.UUID
-	if err := c.conn.QueryRow(ctx, query, meta.CaptureID).Scan(&existing); err == nil {
+	var existingCreatedAt time.Time
+	if err := c.conn.QueryRow(ctx, query, meta.CaptureID).Scan(&existing, &existingCreatedAt); err == nil {
+		// Populate the in-process map so insertBatch can compute tsOffsetNs
+		// correctly, even after a process restart or when another goroutine
+		// won the CreateCapture race.
+		c.storeCaptureStart(existing, existingCreatedAt)
 		return existing, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return uuid.Nil, fmt.Errorf("check capture: %w", err)
 	}
 
-	rawHeader := meta.GlobalHeaderRaw
-	if rawHeader == nil {
-		rawHeader = []byte{}
+	cols, err := meta.ClickhouseColumns()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("capture columns: %w", err)
 	}
-
-	insert := fmt.Sprintf(`INSERT INTO %s
-(capture_id, sensor_id, created_at, endianness, snaplen, linktype, time_res, global_header_raw, codec_version, codec_profile)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, c.capturesTable())
-
-	if err := c.conn.Exec(ctx, insert,
-		meta.CaptureID,
-		meta.SensorID,
-		meta.CreatedAt,
-		meta.Endianness,
-		meta.Snaplen,
-		meta.LinkType,
-		meta.TimeResolution,
-		rawHeader,
-		meta.CodecVersion,
-		meta.CodecProfile,
-	); err != nil {
+	insert := fmt.Sprintf("INSERT INTO %s (%s) VALUES", c.capturesTable(), strings.Join(cols, ", "))
+	capBatch, err := c.conn.PrepareBatch(ctx, insert)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("prepare capture batch: %w", err)
+	}
+	vals, err := meta.ClickhouseValues()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("capture values: %w", err)
+	}
+	if err := capBatch.Append(vals...); err != nil {
+		return uuid.Nil, fmt.Errorf("append capture: %w", err)
+	}
+	if err := capBatch.Send(); err != nil {
 		return uuid.Nil, fmt.Errorf("insert capture: %w", err)
 	}
 
@@ -79,11 +85,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, c.capturesTable())
 // IngestPacket queues one packet for batch insert.
 func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) error {
 	normalizePacket(&p)
-	encoded := EncodePacket(linkType, p)
+	return c.appendToBatch(ctx, EncodePacket(linkType, p))
+}
+
+// appendToBatch adds an encoded packet to the pending batch and flushes if needed.
+func (c *Client) appendToBatch(ctx context.Context, encoded CodecPacket) error {
 	if c.streams != nil {
 		c.streams.Observe(encoded.Nucleus, encoded.Components)
 	}
-
 	c.mu.Lock()
 	c.batch = append(c.batch, encoded)
 	shouldFlush := c.cfg.BatchSize > 0 && len(c.batch) >= c.cfg.BatchSize
@@ -94,7 +103,6 @@ func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) er
 		c.mu.Unlock()
 		return nil
 	}
-
 	batch := c.batch
 	c.batch = nil
 	c.lastFlush = time.Now()
@@ -240,4 +248,149 @@ func normalizePacket(p *Packet) {
 	if p.OrigLen == 0 || p.OrigLen < p.InclLen {
 		p.OrigLen = p.InclLen
 	}
+}
+
+// IngestPCAPStream reads a classic PCAP or pcapng stream, creates a capture
+// record, and ingests all packets. captureID may be uuid.Nil to let
+// CreateCapture generate one. packetIDBase is ORed into each packet's ID;
+// pass 0 for sequential IDs starting at 0. onPacket, if non-nil, is called
+// after each packet is successfully queued.
+//
+// CreatedAt on the capture is derived from the first packet's timestamp so
+// that per-packet time offsets are always non-negative, which is important for
+// archived PCAP files whose timestamps pre-date the ingest time.
+func (c *Client) IngestPCAPStream(
+	ctx context.Context,
+	r io.Reader,
+	captureID uuid.UUID,
+	sensor string,
+	packetIDBase uint64,
+	onPacket func(),
+) (uuid.UUID, error) {
+	br := bufio.NewReader(r)
+
+	header := make([]byte, 24)
+	if _, err := io.ReadFull(br, header); err != nil {
+		return uuid.Nil, fmt.Errorf("read pcap header: %w", err)
+	}
+
+	meta, err := ParseGlobalHeader(header)
+	if errors.Is(err, ErrPcapNG) {
+		return c.ingestNgStream(ctx, io.MultiReader(bytes.NewReader(header), br), captureID, sensor, packetIDBase, onPacket)
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("parse pcap header: %w", err)
+	}
+
+	meta.CaptureID = captureID
+	meta.SensorID = sensor
+	meta.GlobalHeaderRaw = header
+
+	reader, err := pcapgo.NewReader(io.MultiReader(bytes.NewReader(header), br))
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("pcap reader: %w", err)
+	}
+
+	return c.ingestPackets(ctx, meta, reader, packetIDBase, onPacket)
+}
+
+// ingestNgStream handles the pcapng path for IngestPCAPStream.
+// Packets are extracted and stored as classic PCAP; pcapng-specific blocks
+// (SHB, IDB, NRB, ISB, …) are discarded and the capture exports as PCAP.
+func (c *Client) ingestNgStream(
+	ctx context.Context,
+	r io.Reader,
+	captureID uuid.UUID,
+	sensor string,
+	packetIDBase uint64,
+	onPacket func(),
+) (uuid.UUID, error) {
+	meta, ngr, err := ParseNgCaptureMeta(r)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	meta.CaptureID = captureID
+	meta.SensorID = sensor
+	return c.ingestPackets(ctx, meta, ngr, packetIDBase, onPacket)
+}
+
+// packetReader is satisfied by both pcapgo.Reader and pcapgo.NgReader.
+type packetStreamReader interface {
+	ReadPacketData() ([]byte, gopacket.CaptureInfo, error)
+}
+
+// ingestPackets reads from reader, seeds CreatedAt from the first packet
+// timestamp, creates the capture record, ingests all packets, and flushes.
+func (c *Client) ingestPackets(
+	ctx context.Context,
+	meta CaptureMeta,
+	reader packetStreamReader,
+	packetIDBase uint64,
+	onPacket func(),
+) (uuid.UUID, error) {
+	// Read first packet to determine CreatedAt.
+	firstData, firstCI, err := reader.ReadPacketData()
+	if errors.Is(err, io.EOF) {
+		// Empty stream: create the capture with current time.
+		meta.CreatedAt = time.Now()
+		capID, err := c.CreateCapture(ctx, meta)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if err := c.Flush(ctx); err != nil {
+			return uuid.Nil, err
+		}
+		return capID, c.FinalizeStreams(ctx)
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("read first packet: %w", err)
+	}
+
+	meta.CreatedAt = firstCI.Timestamp
+	capID, err := c.CreateCapture(ctx, meta)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	ingest := func(data []byte, ci gopacket.CaptureInfo, seq uint64) error {
+		return c.IngestPacket(ctx, meta.LinkType, Packet{
+			CaptureID: capID,
+			PacketID:  packetIDBase | seq,
+			Timestamp: ci.Timestamp,
+			InclLen:   uint32(ci.CaptureLength),
+			OrigLen:   uint32(ci.Length),
+			Frame:     data,
+		})
+	}
+
+	var seq uint64
+	if err := ingest(firstData, firstCI, seq); err != nil {
+		return uuid.Nil, err
+	}
+	if onPacket != nil {
+		onPacket()
+	}
+	seq++
+
+	for {
+		data, ci, err := reader.ReadPacketData()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("read packet: %w", err)
+		}
+		if err := ingest(data, ci, seq); err != nil {
+			return uuid.Nil, err
+		}
+		if onPacket != nil {
+			onPacket()
+		}
+		seq++
+	}
+
+	if err := c.Flush(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return capID, c.FinalizeStreams(ctx)
 }

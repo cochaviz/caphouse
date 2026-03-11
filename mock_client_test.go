@@ -87,24 +87,17 @@ func (m *mockClient) IngestPacket(linkType uint32, p Packet) error {
 }
 
 func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
-	metaRow := captureMetaRow{
-		Endianness:      m.meta.Endianness,
-		Snaplen:         m.meta.Snaplen,
-		LinkType:        m.meta.LinkType,
-		TimeResolution:  m.meta.TimeResolution,
-		GlobalHeaderRaw: m.meta.GlobalHeaderRaw,
-	}
-	var out bytes.Buffer
-	if err := writePCAPHeader(&out, metaRow); err != nil {
-		return nil, err
-	}
-	order := byteOrder(metaRow.Endianness)
-
 	packetIDs := make([]uint64, 0, len(m.packets))
 	for id := range m.packets {
 		packetIDs = append(packetIDs, id)
 	}
 	sort.Slice(packetIDs, func(i, j int) bool { return packetIDs[i] < packetIDs[j] })
+
+	var out bytes.Buffer
+	if err := writePCAPHeader(&out, m.meta); err != nil {
+		return nil, err
+	}
+	order := byteOrder(m.meta.Endianness)
 
 	for _, id := range packetIDs {
 		nucleus := m.packets[id]
@@ -144,10 +137,9 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct packet %d: %w", id, err)
 		}
-		if err := writePacketRecord(&out, order, nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame); err != nil {
+		if err := writePacketRecord(&out, order, m.meta.TimeResolution, nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame); err != nil {
 			return nil, err
 		}
 	}
-
 	return out.Bytes(), nil
 }

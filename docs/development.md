@@ -15,6 +15,42 @@ understand.
 
 todo...
 
+## Running Tests
+
+The test suite is split into three tiers, each with its own build tag:
+
+### Unit tests
+
+Pure in-memory tests with no external dependencies or file I/O. Run with:
+
+```sh
+go test ./...
+```
+
+### Integration tests
+
+Use fixture files from `testdata/` together with the in-memory mock client. No
+ClickHouse instance is required.
+
+```sh
+go test -tags=integration ./...
+```
+
+### E2E tests
+
+Spin up a real ClickHouse container via
+[testcontainers](https://testcontainers.com/). Docker must be running.
+
+```sh
+go test -tags=e2e ./...
+```
+
+To run all tiers at once:
+
+```sh
+go test -tags=integration,e2e ./...
+```
+
 ## Working with Compression
 
 An important feature of `caphouse` is its ability to efficiently compress PCAPs

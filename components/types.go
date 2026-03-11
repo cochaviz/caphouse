@@ -87,19 +87,6 @@ func (p PacketNucleus) ClickhouseValues() ([]any, error) {
 	return GetClickhouseValuesFrom(p)
 }
 
-// ClickhouseMapper covers all ClickHouse concerns for a component: schema
-// creation, INSERT (columns/values), and SELECT (scan columns/rows).
-type ClickhouseMapper interface {
-	Table() string
-	ClickhouseColumns() ([]string, error)
-	ClickhouseValues() ([]any, error)
-	ScanColumns() []string
-	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
-	FetchOrderBy() string
-	Schema(table string) string
-	Indexes(table string) []string
-}
-
 // LayerDecoder defines the reconstruct contract for decoded layers.
 type LayerDecoder interface {
 	Kind() uint
@@ -118,6 +105,15 @@ type DecodeContext struct {
 	Offset  int
 }
 
+// ClickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns
+// for any type that is stored in ClickHouse.
+type ClickhouseMapper interface {
+	Table() string
+	ClickhouseColumns() ([]string, error)
+	ClickhouseValues() ([]any, error)
+	ScanColumns() []string
+}
+
 // LayerEncoder defines the encoding contract for a gopacket layer.
 type LayerEncoder interface {
 	Encode(gopacket.Layer) ([]Component, error)
@@ -129,6 +125,11 @@ type Component interface {
 	ClickhouseMapper
 	LayerDecoder
 	LayerEncoder
+	// Component-specific ClickHouse methods for schema management and export.
+	Schema(table string) string
+	Indexes(table string) []string
+	FetchOrderBy() string
+	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
 }
 
 func NewComponentMask(bits ...uint) *big.Int {

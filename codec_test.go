@@ -461,15 +461,8 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse header: %v", err)
 	}
-	metaRow := captureMetaRow{
-		Endianness:     meta.Endianness,
-		Snaplen:        meta.Snaplen,
-		LinkType:       meta.LinkType,
-		TimeResolution: meta.TimeResolution,
-	}
-
 	var output bytes.Buffer
-	if err := writePCAPHeader(&output, metaRow); err != nil {
+	if err := writePCAPHeader(&output, meta); err != nil {
 		t.Fatalf("write output header: %v", err)
 	}
 
@@ -477,7 +470,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read input: %v", err)
 	}
-	order := byteOrder(metaRow.Endianness)
+	order := byteOrder(meta.Endianness)
 	packetID := uint64(0)
 	for {
 		data, ci, err := reader.ReadPacketData()
@@ -488,7 +481,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 			t.Fatalf("read input packet: %v", err)
 		}
 
-		encoded := EncodePacket(uint32(metaRow.LinkType), Packet{
+		encoded := EncodePacket(uint32(meta.LinkType), Packet{
 			CaptureID: uuid.New(),
 			PacketID:  packetID,
 			Timestamp: ci.Timestamp,
@@ -502,7 +495,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reconstruct: %v", err)
 		}
-		if err := writePacketRecord(&output, order, ci.Timestamp, uint32(ci.CaptureLength), uint32(ci.Length), reconstructed); err != nil {
+		if err := writePacketRecord(&output, order, meta.TimeResolution, ci.Timestamp, uint32(ci.CaptureLength), uint32(ci.Length), reconstructed); err != nil {
 			t.Fatalf("write output packet: %v", err)
 		}
 	}

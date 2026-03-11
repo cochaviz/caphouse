@@ -1,3 +1,5 @@
+//go:build integration
+
 package caphouse
 
 import (
@@ -7,9 +9,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/uuid"
 )
+
+// packetReader abstracts over pcapgo.Reader and pcapgo.NgReader.
+type packetReader interface {
+	ReadPacketData() ([]byte, gopacket.CaptureInfo, error)
+}
 
 func TestPCAPFileRoundTrip(t *testing.T) {
 	paths, err := filepath.Glob("testdata/*.pcap")
@@ -43,28 +51,7 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 			}
 
 			client := newMockClient(meta)
-			var packetID uint64
-			for {
-				data, ci, err := reader.ReadPacketData()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					t.Fatalf("read packet: %v", err)
-				}
-				err = client.IngestPacket(meta.LinkType, Packet{
-					CaptureID: meta.CaptureID,
-					PacketID:  packetID,
-					Timestamp: ci.Timestamp,
-					InclLen:   uint32(ci.CaptureLength),
-					OrigLen:   uint32(ci.Length),
-					Frame:     data,
-				})
-				if err != nil {
-					t.Fatalf("ingest packet %d: %v", packetID, err)
-				}
-				packetID++
-			}
+			ingestAll(t, client, meta.LinkType, reader)
 
 			out, err := client.ExportCaptureBytes()
 			if err != nil {
@@ -75,4 +62,36 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ingestAll reads all packets from reader into the client and returns the raw frames.
+func ingestAll(t *testing.T, client *mockClient, linkType uint32, reader packetReader) [][]byte {
+	t.Helper()
+	var frames [][]byte
+	var packetID uint64
+	for {
+		data, ci, err := reader.ReadPacketData()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read packet: %v", err)
+		}
+		copied := make([]byte, len(data))
+		copy(copied, data)
+		frames = append(frames, copied)
+
+		if err := client.IngestPacket(linkType, Packet{
+			CaptureID: client.meta.CaptureID,
+			PacketID:  packetID,
+			Timestamp: ci.Timestamp,
+			InclLen:   uint32(ci.CaptureLength),
+			OrigLen:   uint32(ci.Length),
+			Frame:     data,
+		}); err != nil {
+			t.Fatalf("ingest packet %d: %v", packetID, err)
+		}
+		packetID++
+	}
+	return frames
 }
