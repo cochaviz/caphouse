@@ -495,7 +495,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reconstruct: %v", err)
 		}
-		if err := writePacketRecord(&output, order, ci.Timestamp, uint32(ci.CaptureLength), uint32(ci.Length), reconstructed); err != nil {
+		if err := writePacketRecord(&output, order, meta.TimeResolution, ci.Timestamp, uint32(ci.CaptureLength), uint32(ci.Length), reconstructed); err != nil {
 			t.Fatalf("write output packet: %v", err)
 		}
 	}

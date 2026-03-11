@@ -137,7 +137,7 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct packet %d: %w", id, err)
 		}
-		if err := writePacketRecord(&out, order, nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame); err != nil {
+		if err := writePacketRecord(&out, order, m.meta.TimeResolution, nucleus.Timestamp, nucleus.InclLen, nucleus.OrigLen, frame); err != nil {
 			return nil, err
 		}
 	}

@@ -184,7 +184,7 @@ func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData
 	}
 	meta.CaptureID = captureID
 	meta.SensorID = "test"
-	meta.CreatedAt = time.Now()
+	meta.CreatedAt = parsePackets(t, pcapData)[0].ts // anchor to first packet, matching IngestPCAPStream
 	meta.GlobalHeaderRaw = pcapData[:24]
 
 	if _, err := cliClient.CreateCapture(ctx, meta); err != nil {
@@ -328,6 +328,23 @@ func TestE2EConcurrentRings(t *testing.T) {
 			}
 			rings := splitPCAP(t, pcapData, 2)
 			captureID := uuid.New()
+
+			// Pre-create the capture anchored to the globally-earliest packet
+			// timestamp (packet 0, always in ring 0 after round-robin split).
+			// Without this, whichever ring wins the CreateCapture race sets
+			// CreatedAt, and any ring with an earlier first packet would have
+			// those packets clamped to tsOffsetNs=0 and exported with the
+			// wrong timestamp.
+			anchorMeta, err := caphouse.ParseGlobalHeader(pcapData[:24])
+			if err != nil {
+				t.Fatalf("parse header: %v", err)
+			}
+			anchorMeta.CaptureID = captureID
+			anchorMeta.SensorID = "test"
+			anchorMeta.CreatedAt = parsePackets(t, pcapData)[0].ts
+			if _, err := cliClient.CreateCapture(ctx, anchorMeta); err != nil {
+				t.Fatalf("pre-create capture: %v", err)
+			}
 
 			var wg sync.WaitGroup
 			for i, ring := range rings {

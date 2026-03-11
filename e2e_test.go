@@ -56,8 +56,9 @@ func init() {
 	})
 }
 
-// TestE2ERoundtrip ingests every PCAP/PCAPng file in testdata/ via
-// IngestPCAPStream and verifies byte-exact export for both formats.
+// TestE2ERoundtrip ingests every classic PCAP file in testdata/ via
+// IngestPCAPStream and verifies byte-exact export. PCAPng files are covered
+// separately by TestE2EPcapNgCompat (pcapng_e2e_test.go).
 func TestE2ERoundtrip(t *testing.T) {
 	ctx := context.Background()
 	paths, err := filepath.Glob("testdata/*.pcap")

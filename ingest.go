@@ -45,9 +45,14 @@ func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uuid.UUID
 		meta.CodecProfile = components.CodecProfileV1
 	}
 
-	query := fmt.Sprintf("SELECT capture_id FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
+	query := fmt.Sprintf("SELECT capture_id, created_at FROM %s WHERE capture_id = ? LIMIT 1", c.capturesTable())
 	var existing uuid.UUID
-	if err := c.conn.QueryRow(ctx, query, meta.CaptureID).Scan(&existing); err == nil {
+	var existingCreatedAt time.Time
+	if err := c.conn.QueryRow(ctx, query, meta.CaptureID).Scan(&existing, &existingCreatedAt); err == nil {
+		// Populate the in-process map so insertBatch can compute tsOffsetNs
+		// correctly, even after a process restart or when another goroutine
+		// won the CreateCapture race.
+		c.storeCaptureStart(existing, existingCreatedAt)
 		return existing, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return uuid.Nil, fmt.Errorf("check capture: %w", err)

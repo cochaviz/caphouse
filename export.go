@@ -124,7 +124,7 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 				c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
 				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
 			}
-			if err := writePacketRecord(buf, order, ts, row.incl, row.incl+row.truncExtra, frame); err != nil {
+			if err := writePacketRecord(buf, order, meta.TimeResolution, ts, row.incl, row.incl+row.truncExtra, frame); err != nil {
 				return err
 			}
 			if packetsWritten != nil {
@@ -396,7 +396,11 @@ func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
 	}
 	order := byteOrder(endian)
 	var header [24]byte
-	order.PutUint32(header[0:4], 0xA1B2C3D4)
+	magic := uint32(0xA1B2C3D4) // µs magic; same value works for both LE and BE via order.PutUint32
+	if meta.TimeResolution == "ns" {
+		magic = 0xA1B23C4D
+	}
+	order.PutUint32(header[0:4], magic)
 	order.PutUint16(header[4:6], 2)
 	order.PutUint16(header[6:8], 4)
 	order.PutUint32(header[8:12], 0)
@@ -408,7 +412,9 @@ func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
 }
 
 // writePacketRecord writes a single classic PCAP packet record to w.
-func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl uint32, orig uint32, frame []byte) error {
+// timeRes must be "us" (microsecond timestamps) or "ns" (nanosecond timestamps),
+// matching the magic number in the file's global header.
+func writePacketRecord(w io.Writer, order binary.ByteOrder, timeRes string, ts time.Time, incl uint32, orig uint32, frame []byte) error {
 	if incl != uint32(len(frame)) {
 		incl = uint32(len(frame))
 	}
@@ -417,10 +423,15 @@ func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl u
 	}
 
 	sec := ts.Unix()
-	usec := ts.Nanosecond() / 1000
+	var frac int
+	if timeRes == "ns" {
+		frac = ts.Nanosecond()
+	} else {
+		frac = ts.Nanosecond() / 1000
+	}
 	if sec < 0 {
 		sec = 0
-		usec = 0
+		frac = 0
 	}
 	if sec > math.MaxUint32 {
 		sec = math.MaxUint32
@@ -428,7 +439,7 @@ func writePacketRecord(w io.Writer, order binary.ByteOrder, ts time.Time, incl u
 
 	var header [16]byte
 	order.PutUint32(header[0:4], uint32(sec))
-	order.PutUint32(header[4:8], uint32(usec))
+	order.PutUint32(header[4:8], uint32(frac))
 	order.PutUint32(header[8:12], incl)
 	order.PutUint32(header[12:16], orig)
 	if _, err := w.Write(header[:]); err != nil {
