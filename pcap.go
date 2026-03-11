@@ -70,16 +70,11 @@ func (CaptureMeta) ScanColumns() []string {
 
 // ScanRow populates m from a single ClickHouse row (e.g. from QueryRow).
 func (m *CaptureMeta) ScanRow(row chdriver.Row) error {
-	var headerRaw string
-	if err := row.Scan(
-		&m.CaptureID, &m.SensorID, &m.CreatedAt,
-		&m.Endianness, &m.Snaplen, &m.LinkType, &m.TimeResolution,
-		&headerRaw,
-		&m.CodecVersion, &m.CodecProfile,
-	); err != nil {
+	result, err := scanCaptureMeta(row.Scan)
+	if err != nil {
 		return err
 	}
-	m.GlobalHeaderRaw = []byte(headerRaw)
+	*m = result
 	return nil
 }
 
@@ -115,6 +110,48 @@ func ParseGlobalHeader(raw []byte) (CaptureMeta, error) {
 	meta.LinkType = order.Uint32(raw[20:24])
 	meta.GlobalHeaderRaw = raw[:24]
 	return meta, nil
+}
+
+// scanCaptureMeta scans one CaptureMeta row using the provided scan function.
+// Works with both chdriver.Row (QueryRow) and chdriver.Rows (Query).
+func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
+	var m CaptureMeta
+	var headerRaw string
+	if err := scan(
+		&m.CaptureID, &m.SensorID, &m.CreatedAt,
+		&m.Endianness, &m.Snaplen, &m.LinkType, &m.TimeResolution,
+		&headerRaw,
+		&m.CodecVersion, &m.CodecProfile,
+	); err != nil {
+		return CaptureMeta{}, err
+	}
+	m.GlobalHeaderRaw = []byte(headerRaw)
+	return m, nil
+}
+
+// FetchCapturesInRange returns all captures whose start time (created_at) is
+// at or before to. The caller is responsible for further filtering via
+// QueryPackets; this function only provides the candidate capture set.
+func (c *Client) FetchCapturesInRange(ctx context.Context, to time.Time) ([]CaptureMeta, error) {
+	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
+	query := fmt.Sprintf(
+		"SELECT %s FROM %s FINAL WHERE created_at <= ? ORDER BY created_at ASC, capture_id ASC",
+		cols, c.capturesTable(),
+	)
+	rows, err := c.conn.Query(ctx, query, to)
+	if err != nil {
+		return nil, fmt.Errorf("fetch captures in range: %w", err)
+	}
+	defer rows.Close()
+	var captures []CaptureMeta
+	for rows.Next() {
+		m, err := scanCaptureMeta(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan capture meta: %w", err)
+		}
+		captures = append(captures, m)
+	}
+	return captures, rows.Err()
 }
 
 // fetchCaptureMeta retrieves the stored metadata for a capture.

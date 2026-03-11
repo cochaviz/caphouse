@@ -2,7 +2,6 @@ package caphouse
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -49,11 +48,9 @@ func ParseQuery(s string) (Query, error) {
 }
 
 // QueryPackets returns the packet references within the given captures that
-// match f, ordered by (capture_id, packet_id).
+// match f, ordered by (capture_id, packet_id). When captureIDs is nil or
+// empty, all captures are searched.
 func (c *Client) QueryPackets(ctx context.Context, captureIDs []uuid.UUID, f Query) ([]PacketRef, error) {
-	if len(captureIDs) == 0 {
-		return nil, errors.New("at least one capture ID is required")
-	}
 	sub, args, err := f.root.subquery(c, captureIDs)
 	if err != nil {
 		return nil, err
@@ -148,10 +145,16 @@ var knownComponents = func() map[string]struct{ table, alias string } {
 }()
 
 // GenerateSQL returns a SELECT statement equivalent to the filter query with
-// all bind parameters inlined. components is a list of protocol table names
-// (e.g. "ipv4", "tcp") whose rows will be LEFT JOINed into the result.
+// all bind parameters inlined, scoped to a single capture. components is a
+// list of protocol table names (e.g. "ipv4", "tcp") to LEFT JOIN.
 func (c *Client) GenerateSQL(captureID uuid.UUID, q Query, components []string) (string, error) {
-	sub, args, err := q.root.subquery(c, []uuid.UUID{captureID})
+	return c.GenerateSQLForCaptures([]uuid.UUID{captureID}, q, components)
+}
+
+// GenerateSQLForCaptures is like GenerateSQL but scoped to multiple captures.
+// When captureIDs is nil or empty, the generated SQL covers all captures.
+func (c *Client) GenerateSQLForCaptures(captureIDs []uuid.UUID, q Query, components []string) (string, error) {
+	sub, args, err := q.root.subquery(c, captureIDs)
 	if err != nil {
 		return "", err
 	}
@@ -202,6 +205,43 @@ func (c *Client) GenerateSQL(captureID uuid.UUID, q Query, components []string) 
 	return sb.String(), nil
 }
 
+// TimeRange extracts the time bounds from a query. Returns (from, to) as Unix
+// nanoseconds and ok=true when the query contains at least one time node. For
+// AND queries, the intersection of both sides is returned. For OR queries, the
+// union. ok is false when the query contains no time filter.
+func (q Query) TimeRange() (from, to int64, ok bool) {
+	return extractTimeRange(q.root)
+}
+
+func extractTimeRange(n queryNode) (from, to int64, ok bool) {
+	switch t := n.(type) {
+	case *timeNode:
+		return t.from, t.to, true
+	case *andNode:
+		lf, lt, lok := extractTimeRange(t.left)
+		rf, rt, rok := extractTimeRange(t.right)
+		if lok && rok {
+			return max(lf, rf), min(lt, rt), true
+		}
+		if lok {
+			return lf, lt, true
+		}
+		return rf, rt, rok
+	case *orNode:
+		lf, lt, lok := extractTimeRange(t.left)
+		rf, rt, rok := extractTimeRange(t.right)
+		if lok && rok {
+			return min(lf, rf), max(lt, rt), true
+		}
+		if lok {
+			return lf, lt, true
+		}
+		return rf, rt, rok
+	default:
+		return 0, 0, false
+	}
+}
+
 // queryNode produces a SQL subquery returning (capture_id, packet_id) rows.
 type queryNode interface {
 	subquery(c *Client, captureIDs []uuid.UUID) (sql string, args []any, err error)
@@ -209,12 +249,33 @@ type queryNode interface {
 
 // captureInSQL returns a SQL IN predicate with capture UUIDs inlined.
 // UUIDs are safe to inline — they are hex strings validated by the uuid package.
+// Panics if ids is empty; use captureScope / whereWithScope instead when ids
+// may be nil/empty.
 func captureInSQL(ids []uuid.UUID) string {
 	quoted := make([]string, len(ids))
 	for i, id := range ids {
 		quoted[i] = "'" + id.String() + "'"
 	}
 	return "capture_id IN (" + strings.Join(quoted, ",") + ")"
+}
+
+// captureScope returns a WHERE clause (including the keyword) that restricts
+// to the given captures, or an empty string when ids is nil/empty (meaning
+// "all captures — no restriction").
+func captureScope(ids []uuid.UUID) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	return "WHERE " + captureInSQL(ids)
+}
+
+// whereWithScope returns a WHERE clause combining an optional capture scope
+// with a mandatory condition. When ids is empty only the condition is used.
+func whereWithScope(ids []uuid.UUID, condition string) string {
+	if len(ids) == 0 {
+		return "WHERE " + condition
+	}
+	return "WHERE " + captureInSQL(ids) + " AND " + condition
 }
 
 // --- and / or / not ---
@@ -254,10 +315,13 @@ func (n *notNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	universe := fmt.Sprintf(
-		"SELECT capture_id, packet_id FROM %s FINAL WHERE %s",
-		c.packetsTable(), captureInSQL(ids),
-	)
+	scope := captureScope(ids)
+	var universe string
+	if scope == "" {
+		universe = fmt.Sprintf("SELECT capture_id, packet_id FROM %s FINAL", c.packetsTable())
+	} else {
+		universe = fmt.Sprintf("SELECT capture_id, packet_id FROM %s FINAL %s", c.packetsTable(), scope)
+	}
 	return "(" + universe + ") EXCEPT (" + es + ")", ea, nil
 }
 
@@ -269,7 +333,6 @@ type hostNode struct {
 }
 
 func (n *hostNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
-	scope := captureInSQL(ids)
 	var args []any
 	var parts []string
 
@@ -287,8 +350,8 @@ func (n *hostNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
 			args = append(args, n.ip, n.ip)
 		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT capture_id, packet_id FROM %s FINAL WHERE %s AND %s",
-			table, scope, cond,
+			"SELECT capture_id, packet_id FROM %s FINAL %s",
+			table, whereWithScope(ids, cond),
 		))
 	}
 
@@ -305,7 +368,6 @@ type portNode struct {
 }
 
 func (n *portNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
-	scope := captureInSQL(ids)
 	var args []any
 	var parts []string
 
@@ -323,8 +385,8 @@ func (n *portNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
 			args = append(args, n.port, n.port)
 		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT capture_id, packet_id FROM %s FINAL WHERE %s AND %s",
-			table, scope, cond,
+			"SELECT capture_id, packet_id FROM %s FINAL %s",
+			table, whereWithScope(ids, cond),
 		))
 	}
 
@@ -340,19 +402,25 @@ type timeNode struct {
 }
 
 func (n *timeNode) subquery(c *Client, ids []uuid.UUID) (string, []any, error) {
-	scope := captureInSQL(ids)
 	// ts is stored as ns offset from capture start.
 	// Absolute ns = toUnixTimestamp64Nano(created_at) + ts
+	//
+	// PREWHERE created_at <= to prunes captures that started after the query
+	// window — they cannot contain any in-range packets. We do not apply a
+	// lower-bound PREWHERE because a capture that started before `from` may
+	// still have packets inside [from, to].
+	capScope := captureScope(ids)
+	timeCond := "toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) BETWEEN ? AND ?"
 	sql := fmt.Sprintf(`
 		SELECT p.capture_id, p.packet_id
 		FROM %s p FINAL
 		INNER JOIN (
-			SELECT capture_id, created_at FROM %s FINAL WHERE %s
+			SELECT capture_id, created_at FROM %s FINAL %s
+			PREWHERE toInt64(toUnixTimestamp64Nano(created_at)) <= ?
 		) cap ON p.capture_id = cap.capture_id
-		WHERE %s
-		  AND toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts)
-		      BETWEEN ? AND ?`,
-		c.packetsTable(), c.capturesTable(), scope, scope,
+		%s`,
+		c.packetsTable(), c.capturesTable(), capScope,
+		whereWithScope(ids, timeCond),
 	)
-	return sql, []any{n.from, n.to}, nil
+	return sql, []any{n.to, n.from, n.to}, nil
 }

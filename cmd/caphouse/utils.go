@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync/atomic"
@@ -236,6 +238,40 @@ func firstNonEmpty(vals ...string) string {
 // bits for the per-packet sequential offset.
 func sumToPacketIDBase(sum []byte) uint64 {
 	return uint64(binary.BigEndian.Uint32(sum[8:12])) << 32
+}
+
+// resolveInputFiles expands a list of file path patterns into concrete file
+// paths. Patterns may be literal paths or glob expressions (e.g. "ring*.pcap").
+// An empty or nil list (or a list containing only "-") is returned as-is,
+// indicating stdin. Each pattern that matches no files is an error.
+// Duplicate paths are silently removed while preserving order.
+func resolveInputFiles(patterns []string) ([]string, error) {
+	// Single "-" means stdin; pass through unchanged.
+	if len(patterns) == 1 && patterns[0] == "-" {
+		return patterns, nil
+	}
+
+	seen := make(map[string]bool)
+	var out []string
+	for _, pat := range patterns {
+		if pat == "-" {
+			return nil, errors.New("cannot combine stdin (-) with file paths")
+		}
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob pattern %q: %w", pat, err)
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no files matched %q", pat)
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out, nil
 }
 
 // stablePacketIDBase computes the packet-ID base for in-memory PCAP data.

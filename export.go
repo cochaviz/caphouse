@@ -5,6 +5,7 @@ import (
 	"caphouse/components"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -380,6 +381,315 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 			c.log.Debug("component", "index", i, "type", fmt.Sprintf("%T", comp))
 		}
 	}
+}
+
+// timedPacketRef is a packet reference augmented with absolute-time sort keys
+// for merging across captures.
+type timedPacketRef struct {
+	captureID        uuid.UUID
+	packetID         uint64
+	absNs            int64
+	captureCreatedAt time.Time
+}
+
+// fetchSortedPacketRefs queries packets whose absolute timestamp falls in
+// [from, to] (Unix nanoseconds), returning them sorted by
+// (absNs ASC, captureCreatedAt ASC, captureID ASC, packetID ASC).
+// When captureIDs is nil or empty, all captures are searched.
+func (c *Client) fetchSortedPacketRefs(ctx context.Context, captureIDs []uuid.UUID, from, to int64) ([]timedPacketRef, error) {
+	capScope := captureScope(captureIDs)
+	// PREWHERE created_at <= to prunes captures that started after the query
+	// window. We cannot apply a lower-bound prewhere because a capture that
+	// started before `from` can still have packets inside [from, to].
+	query := fmt.Sprintf(`
+		SELECT capture_id, packet_id, abs_ns, capture_created_at
+		FROM (
+			SELECT p.capture_id, p.packet_id,
+			       toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) AS abs_ns,
+			       cap.created_at AS capture_created_at
+			FROM %s p FINAL
+			INNER JOIN (
+				SELECT capture_id, created_at FROM %s FINAL %s
+				PREWHERE toInt64(toUnixTimestamp64Nano(created_at)) <= ?
+			) cap ON p.capture_id = cap.capture_id
+		)
+		WHERE abs_ns BETWEEN ? AND ?
+		ORDER BY abs_ns ASC, capture_created_at ASC, capture_id ASC, packet_id ASC`,
+		c.packetsTable(), c.capturesTable(), capScope,
+	)
+	rows, err := c.conn.Query(ctx, query, to, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("fetch sorted packet refs: %w", err)
+	}
+	defer rows.Close()
+	var refs []timedPacketRef
+	for rows.Next() {
+		var r timedPacketRef
+		if err := rows.Scan(&r.captureID, &r.packetID, &r.absNs, &r.captureCreatedAt); err != nil {
+			return nil, fmt.Errorf("scan timed packet ref: %w", err)
+		}
+		refs = append(refs, r)
+	}
+	return refs, rows.Err()
+}
+
+// reconstructedPkt holds a single reconstructed packet ready for export.
+type reconstructedPkt struct {
+	ts    time.Time
+	incl  uint32
+	orig  uint32
+	frame []byte
+}
+
+// fetchReconstructedPackets fetches nucleus data and all components for the
+// given packet IDs in captureID, then returns reconstructed packets keyed by
+// packetID.
+func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.UUID, meta CaptureMeta, packetIDs []uint64) (map[uint64]reconstructedPkt, error) {
+	if len(packetIDs) == 0 {
+		return nil, nil
+	}
+	ranges := toRanges(packetIDs)
+	const selectCols = "SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash"
+	type nucleusRow struct {
+		packetID      uint64
+		tsOffsetNs    uint64
+		incl          uint32
+		truncExtra    uint32
+		componentMask *big.Int
+		frameRaw      string
+		frameHash     string
+	}
+	var nuclei []nucleusRow
+	for start := 0; start < len(ranges); start += maxRangesPerQuery {
+		end := min(start+maxRangesPerQuery, len(ranges))
+		chunk := ranges[start:end]
+		whereClause, whereArgs := rangeArgs(captureID, chunk)
+		query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY packet_id ASC",
+			selectCols, c.packetsTable(), whereClause)
+		rows, err := c.conn.Query(ctx, query, whereArgs...)
+		if err != nil {
+			return nil, fmt.Errorf("fetch nuclei for capture %s: %w", captureID, err)
+		}
+		for rows.Next() {
+			componentMask := new(big.Int)
+			var row nucleusRow
+			row.componentMask = componentMask
+			if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan nucleus: %w", err)
+			}
+			nuclei = append(nuclei, row)
+		}
+		iterErr := rows.Err()
+		rows.Close()
+		if iterErr != nil {
+			return nil, fmt.Errorf("iterate nuclei: %w", iterErr)
+		}
+	}
+
+	all, err := c.fetchComponentsForBatch(ctx, captureID, packetIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[uint64]reconstructedPkt, len(nuclei))
+	for _, row := range nuclei {
+		ts := meta.CreatedAt.Add(time.Duration(row.tsOffsetNs))
+		nucleus := components.PacketNucleus{
+			CaptureID:  captureID,
+			PacketID:   row.packetID,
+			Timestamp:  ts,
+			InclLen:    row.incl,
+			OrigLen:    row.incl + row.truncExtra,
+			Components: row.componentMask,
+			FrameRaw:   []byte(row.frameRaw),
+			FrameHash:  []byte(row.frameHash),
+		}
+		componentList, err := resolveComponents(nucleus, all)
+		if err != nil {
+			return nil, err
+		}
+		frame, err := ReconstructFrame(nucleus, componentList)
+		if err != nil {
+			c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
+			return nil, fmt.Errorf("reconstruct packet %d in capture %s: %w", row.packetID, captureID, err)
+		}
+		result[row.packetID] = reconstructedPkt{
+			ts:    ts,
+			incl:  row.incl,
+			orig:  row.incl + row.truncExtra,
+			frame: frame,
+		}
+	}
+	return result, nil
+}
+
+// ExportAllCapturesFiltered finds all captures with a start time at or before
+// the upper bound of f's time filter, then exports all matching packets as a
+// single merged PCAP file sorted by absolute packet time. Ties are broken by
+// capture start time, then by capture ID.
+//
+// f must contain a time filter; if it does not, an error is returned.
+// packetsWritten is incremented after each packet (may be nil).
+func (c *Client) ExportAllCapturesFiltered(ctx context.Context, f Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
+	from, to, ok := f.TimeRange()
+	if !ok {
+		return nil, 0, errors.New("--capture all requires a time range filter (e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z')")
+	}
+
+	// Query across all captures — no capture ID pre-filter.
+	refs, err := c.fetchSortedPacketRefs(ctx, nil, from, to)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Build capture metadata map only for captures that have matching packets.
+	captureMap, err := c.fetchCaptureMetaMap(ctx, uniqueCaptureIDs(refs))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		if err := c.streamMergedCaptures(ctx, refs, captureMap, pw, packetsWritten); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+	return pr, int64(len(refs)), nil
+}
+
+// uniqueCaptureIDs returns the deduplicated set of capture IDs referenced by refs.
+func uniqueCaptureIDs(refs []timedPacketRef) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(refs))
+	var out []uuid.UUID
+	for _, r := range refs {
+		if !seen[r.captureID] {
+			seen[r.captureID] = true
+			out = append(out, r.captureID)
+		}
+	}
+	return out
+}
+
+// fetchCaptureMetaMap fetches CaptureMeta for each of the given capture IDs
+// and returns them as a map keyed by capture ID.
+func (c *Client) fetchCaptureMetaMap(ctx context.Context, captureIDs []uuid.UUID) (map[uuid.UUID]CaptureMeta, error) {
+	if len(captureIDs) == 0 {
+		return nil, nil
+	}
+	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
+	query := fmt.Sprintf(
+		"SELECT %s FROM %s FINAL WHERE %s",
+		cols, c.capturesTable(), captureInSQL(captureIDs),
+	)
+	rows, err := c.conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("fetch capture meta map: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[uuid.UUID]CaptureMeta, len(captureIDs))
+	for rows.Next() {
+		m, err := scanCaptureMeta(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan capture meta: %w", err)
+		}
+		result[m.CaptureID] = m
+	}
+	return result, rows.Err()
+}
+
+// streamMergedCaptures writes all packets described by refs (in their given
+// order) to w as a single PCAP stream with a synthetic LE/µs header.
+func (c *Client) streamMergedCaptures(
+	ctx context.Context,
+	refs []timedPacketRef,
+	captureMap map[uuid.UUID]CaptureMeta,
+	w io.Writer,
+	packetsWritten *atomic.Int64,
+) error {
+	// Determine link type and snaplen from the captures present in refs.
+	var linkType, snaplen uint32
+	linkType = 1    // Ethernet default
+	snaplen = 65535 // default
+	seenLinkTypes := map[uint32]bool{}
+	for _, ref := range refs {
+		if m, ok := captureMap[ref.captureID]; ok {
+			seenLinkTypes[m.LinkType] = true
+			if m.Snaplen > snaplen {
+				snaplen = m.Snaplen
+			}
+		}
+	}
+	if len(seenLinkTypes) == 1 {
+		for lt := range seenLinkTypes {
+			linkType = lt
+		}
+	} else if len(seenLinkTypes) > 1 {
+		c.log.Warn("merged export contains captures with different link types; using first encountered link type",
+			"link_types", seenLinkTypes)
+		// Use link type from the first ref's capture.
+		if m, ok := captureMap[refs[0].captureID]; ok {
+			linkType = m.LinkType
+		}
+	}
+
+	syntheticMeta := CaptureMeta{
+		Endianness:     "le",
+		TimeResolution: "us",
+		Snaplen:        snaplen,
+		LinkType:       linkType,
+	}
+
+	buf := bufio.NewWriterSize(w, 128*1024)
+	c.log.Warn("exporting merged capture with synthetic PCAP header",
+		"capture_count", len(captureMap),
+		"packet_count", len(refs))
+	if err := writePCAPHeader(buf, syntheticMeta); err != nil {
+		return err
+	}
+
+	if len(refs) == 0 {
+		return buf.Flush()
+	}
+
+	order := byteOrder(syntheticMeta.Endianness)
+
+	// Group packet IDs by captureID for batch fetching.
+	packetsByCapture := make(map[uuid.UUID][]uint64)
+	for _, ref := range refs {
+		packetsByCapture[ref.captureID] = append(packetsByCapture[ref.captureID], ref.packetID)
+	}
+
+	// Fetch and reconstruct all packets for each capture.
+	allPackets := make(map[uuid.UUID]map[uint64]reconstructedPkt, len(packetsByCapture))
+	for captureID, ids := range packetsByCapture {
+		meta, ok := captureMap[captureID]
+		if !ok {
+			return fmt.Errorf("missing capture meta for %s", captureID)
+		}
+		pkts, err := c.fetchReconstructedPackets(ctx, captureID, meta, ids)
+		if err != nil {
+			return err
+		}
+		allPackets[captureID] = pkts
+	}
+
+	// Write packets in the globally-sorted ref order.
+	for _, ref := range refs {
+		pkt, ok := allPackets[ref.captureID][ref.packetID]
+		if !ok {
+			return fmt.Errorf("packet %d from capture %s not reconstructed", ref.packetID, ref.captureID)
+		}
+		if err := writePacketRecord(buf, order, syntheticMeta.TimeResolution, pkt.ts, pkt.incl, pkt.orig, pkt.frame); err != nil {
+			return err
+		}
+		if packetsWritten != nil {
+			packetsWritten.Add(1)
+		}
+	}
+	return buf.Flush()
 }
 
 // writePCAPHeader writes a classic PCAP global header to w. If
