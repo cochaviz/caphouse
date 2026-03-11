@@ -21,7 +21,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// CreateCapture inserts a capture row if it does not exist.
+// CreateCapture inserts a capture record and returns its UUID. If a capture
+// with the same ID already exists the existing UUID is returned without
+// modification. Zero fields in meta are filled with safe defaults (little-endian,
+// microsecond resolution, snaplen 65535, current time). Call CreateCapture
+// before any IngestPacket calls for the same capture ID.
 func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uuid.UUID, error) {
 	if meta.CaptureID == uuid.Nil {
 		meta.CaptureID = uuid.New()
@@ -82,14 +86,17 @@ func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uuid.UUID
 	return meta.CaptureID, nil
 }
 
-// IngestPacket queues one packet for batch insert.
+// IngestPacket encodes p into its protocol layers and queues it for batch
+// insert. Batches are flushed automatically when BatchSize is reached or
+// FlushInterval elapses; call Flush to force an immediate flush.
+// CreateCapture must be called for p.CaptureID before IngestPacket.
 func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) error {
 	normalizePacket(&p)
-	return c.appendToBatch(ctx, EncodePacket(linkType, p))
+	return c.appendToBatch(ctx, encodePacket(linkType, p))
 }
 
 // appendToBatch adds an encoded packet to the pending batch and flushes if needed.
-func (c *Client) appendToBatch(ctx context.Context, encoded CodecPacket) error {
+func (c *Client) appendToBatch(ctx context.Context, encoded codecPacket) error {
 	if c.streams != nil {
 		c.streams.Observe(encoded.Nucleus, encoded.Components)
 	}
@@ -130,7 +137,7 @@ const (
 	retryMaxAttempts = 5
 )
 
-func (c *Client) insertBatchWithRetry(ctx context.Context, batch []CodecPacket) error {
+func (c *Client) insertBatchWithRetry(ctx context.Context, batch []codecPacket) error {
 	var lastErr error
 	delay := retryBaseDelay
 	for attempt := 0; attempt < retryMaxAttempts; attempt++ {
@@ -161,7 +168,7 @@ func (c *Client) insertBatchWithRetry(ctx context.Context, batch []CodecPacket) 
 	return fmt.Errorf("batch insert failed after %d attempts: %w", retryMaxAttempts, lastErr)
 }
 
-func (c *Client) insertBatch(ctx context.Context, batch []CodecPacket) error {
+func (c *Client) insertBatch(ctx context.Context, batch []codecPacket) error {
 	if len(batch) == 0 {
 		return nil
 	}

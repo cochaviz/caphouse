@@ -13,52 +13,22 @@ the raw bytes of a packet and extract meaningful information from them. Mostly,
 they're direct mappings of `gopacket` layers, making them easy to use and
 understand.
 
-todo...
+Full documentation for the component system — including a step-by-step guide for
+adding a new protocol layer — is in the package godoc:
+<https://pkg.go.dev/github.com/cochaviz/caphouse/components>
 
-## Public Library API
+## Library API
 
-The `caphouse` package exposes a small set of methods on `*Client` that are
-suitable for use outside the CLI.
+Full API reference is available on pkg.go.dev:
+<https://pkg.go.dev/github.com/cochaviz/caphouse>
 
-### `IngestPCAPStream`
+All exported symbols carry godoc comments. Key entry points:
 
-```go
-func (c *Client) IngestPCAPStream(ctx context.Context, r io.Reader, meta CaptureMeta) error
-```
-
-Transparently handles both classic PCAP and PCAPng input. Parses each packet
-into its protocol layers and writes them to ClickHouse. Use this as the single
-entry point for stream-based ingest.
-
-### `ExportAllCapturesFiltered`
-
-```go
-func (c *Client) ExportAllCapturesFiltered(
-    ctx context.Context,
-    f Query,
-    packetsWritten *atomic.Int64,
-) (rc io.ReadCloser, total int64, err error)
-```
-
-Merges packets from every stored capture that match `f` into a single
-time-sorted PCAP stream. `f` must contain a `time` primitive; an error is
-returned otherwise. `packetsWritten` is incremented after each packet (may be
-nil). Returns the total matched packet count alongside the reader so callers
-can use it for progress reporting.
-
-### `GenerateSQLForCaptures`
-
-```go
-func (c *Client) GenerateSQLForCaptures(
-    captureIDs []uuid.UUID,
-    q Query,
-    components []string,
-) (string, error)
-```
-
-Like `GenerateSQL` but accepts a list of capture IDs. Pass `nil` (or an empty
-slice) to generate a `SELECT` statement that spans all captures without an
-explicit `capture_id IN (...)` predicate.
+- **`New`** — create a `*Client` from a `Config`
+- **`Client.IngestPCAPStream`** — ingest a classic PCAP or PCAPng stream
+- **`Client.ExportCapture`** / **`ExportCaptureFiltered`** / **`ExportAllCapturesFiltered`** — export one or more captures as PCAP
+- **`ParseQuery`** — compile a tcpdump-style filter expression
+- **`Client.GenerateSQL`** / **`GenerateSQLForCaptures`** — render a filter as a ClickHouse `SELECT`
 
 ## Running Tests
 

@@ -24,8 +24,53 @@ import (
 //go:embed scripts/caphouse-monitor.sh
 var monitorScript []byte
 
-//go:embed description.txt
-var longDescription string
+const longDescription = `caphouse stores and exports classic PCAP files in ClickHouse.
+
+Instead of writing raw frames to disk, it parses each packet into its protocol
+layers and stores each layer in its own ClickHouse table. This makes packet data
+queryable at the column level while still allowing lossless PCAP reconstruction.
+
+Supported protocol layers: Ethernet, dot1q (VLAN), Linux SLL, IPv4 (with
+options), IPv6 (with extension headers), TCP, and UDP.
+
+Modes:
+  -r (default)  Read one or more PCAP files (or stdin) and ingest into ClickHouse.
+  -w            Export a stored capture back as a PCAP file or stream.
+
+Input files (read mode) and the output file (write mode) are positional
+arguments. Multiple files and glob patterns are accepted in read mode.
+
+The DSN must use the native ClickHouse protocol (clickhouse://host:9000/db).
+HTTP connections are not supported.
+
+Examples:
+  # Ingest a file (new capture; UUID printed on completion)
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost capture.pcap
+
+  # Ingest multiple files or a glob
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost ring*.pcap
+
+  # Ingest without L7 stream tracking
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --no-streams capture.pcap
+
+  # Append packets to an existing capture
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost more.pcap --capture=<uuid>
+
+  # Pipe from tcpdump
+  tcpdump -i eth0 -w - | caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost
+
+  # Export to a file
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> out.pcap
+
+  # Stream into tcpreplay
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=<uuid> | tcpreplay --intf1=eth0 -
+
+  # Export all captures within a time window, merged and sorted by time
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=all \
+    --query="time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z" merged.pcap
+
+  # Suppress all progress output (useful in scripts)
+  caphouse -s --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost capture.pcap`
 
 //go:embed banner.txt
 var banner string

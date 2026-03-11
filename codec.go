@@ -11,8 +11,11 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-// EncodePacket parses a packet frame into codec components.
-func EncodePacket(linkType uint32, p Packet) CodecPacket {
+// encodePacket parses a raw frame into a codecPacket whose Components slice
+// holds one entry per recognised protocol layer. Layers that cannot be decoded,
+// or frames whose layer structure violates basic sanity checks (e.g. L4 without
+// L3), fall back to storing the full raw frame in the nucleus instead.
+func encodePacket(linkType uint32, p Packet) codecPacket {
 	frame := copyBytes(p.Frame)
 	mask := components.NewComponentMask()
 	if p.OrigLen > p.InclLen {
@@ -102,14 +105,17 @@ func EncodePacket(linkType uint32, p Packet) CodecPacket {
 		nucleus.Components.SetBit(nucleus.Components, int(component.Kind()), 1)
 	}
 
-	return CodecPacket{
+	return codecPacket{
 		Nucleus:    nucleus,
 		Components: componentList,
 	}
 }
 
-// ReconstructFrame rebuilds packet bytes using component presence and tail_offset.
-func ReconstructFrame(nucleus components.PacketNucleus, comps []components.Component) ([]byte, error) {
+// reconstructFrame rebuilds the original frame bytes from a stored nucleus and
+// its protocol-layer components. If the raw-frame bit is set in the nucleus,
+// the stored frame bytes are returned directly without consulting comps.
+// Returns an error if a component's kind bit is not set in the nucleus mask.
+func reconstructFrame(nucleus components.PacketNucleus, comps []components.Component) ([]byte, error) {
 	if components.ComponentHas(nucleus.Components, components.ComponentRawFrame) {
 		if len(nucleus.FrameRaw) == 0 {
 			return nil, errors.New("raw frame bit set but frame_raw empty")
@@ -192,7 +198,7 @@ func ReconstructFrame(nucleus components.PacketNucleus, comps []components.Compo
 	return copyBytes(serialized), nil
 }
 
-func rawFrameFallback(nucleus components.PacketNucleus, frame []byte) CodecPacket {
+func rawFrameFallback(nucleus components.PacketNucleus, frame []byte) codecPacket {
 	mask := components.NewComponentMask(components.ComponentRawFrame)
 	if components.ComponentHas(nucleus.Components, components.ComponentTruncated) {
 		mask.SetBit(mask, int(components.ComponentTruncated), 1)
@@ -203,7 +209,7 @@ func rawFrameFallback(nucleus components.PacketNucleus, frame []byte) CodecPacke
 	nucleus.Components = mask
 	nucleus.FrameRaw = frame
 	nucleus.TailOffset = 0
-	return CodecPacket{Nucleus: nucleus}
+	return codecPacket{Nucleus: nucleus}
 }
 
 const maxTailOffset = 1<<16 - 1

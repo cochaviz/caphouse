@@ -29,13 +29,13 @@ type Client struct {
 	log  *slog.Logger
 
 	mu        sync.Mutex
-	batch     []CodecPacket
+	batch     []codecPacket
 	lastFlush time.Time
 
+	capturesMu sync.RWMutex
 	// captureStarts maps capture_id → capture CreatedAt so that insertBatch
 	// can store ts as a nanosecond offset from capture start rather than an
 	// absolute timestamp.
-	capturesMu    sync.RWMutex
 	captureStarts map[uuid.UUID]time.Time
 
 	// streams tracks TCP stream state for L7 protocol detection.

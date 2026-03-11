@@ -15,8 +15,7 @@ When applying changes to this codebase, consider updating the following user-fac
 | `docs/storage.md` | Storage layout, compression, codec internals | Changes to table schema, codec, component system, or ClickHouse queries |
 | `docs/development.md` | Running tests, dev environment setup, contributing guide | New test targets, build requirements, or dev workflow changes |
 | `docs/changelog.md` | Includes `CHANGELOG.md` verbatim via mkdocs `include` | Automatically reflects CHANGELOG changes; update if structure changes |
-| `cmd/caphouse/description.txt` | Long help text embedded as the root command `--help` description | Any change to supported modes, flags, or overall CLI behaviour |
-| `cmd/caphouse/cli.go` | `Short` descriptions and `Use` strings for all cobra commands | Commands added/removed, flag names/semantics changed, sub-command restructuring |
+| `cmd/caphouse/cli.go` | `Long` description (the `--help` body), `Short` summaries, and `Use` strings for all cobra commands | Any change to supported modes, flags, CLI behaviour, or usage examples |
 
 ## Notes
 

@@ -57,7 +57,7 @@ func newMockClient(meta CaptureMeta) *mockClient {
 
 func (m *mockClient) IngestPacket(linkType uint32, p Packet) error {
 	normalizePacket(&p)
-	encoded := EncodePacket(linkType, p)
+	encoded := encodePacket(linkType, p)
 	m.packets[p.PacketID] = encoded.Nucleus
 	for _, component := range encoded.Components {
 		switch component := component.(type) {
@@ -133,7 +133,7 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 			componentsList = append(componentsList, comp)
 		}
 
-		frame, err := ReconstructFrame(nucleus, componentsList)
+		frame, err := reconstructFrame(nucleus, componentsList)
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct packet %d: %w", id, err)
 		}

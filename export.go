@@ -28,7 +28,9 @@ func (c *Client) CountPackets(ctx context.Context, captureID uuid.UUID) (int64, 
 	return int64(n), nil
 }
 
-// ExportCapture returns a reader that streams a classic PCAP file.
+// ExportCapture returns a reader that streams the complete capture as a classic
+// PCAP file. The caller must close the returned reader. For progress tracking
+// use ExportCaptureWithProgress.
 func (c *Client) ExportCapture(ctx context.Context, captureID uuid.UUID) (io.ReadCloser, error) {
 	return c.ExportCaptureWithProgress(ctx, captureID, nil)
 }
@@ -120,7 +122,7 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 			if err != nil {
 				return err
 			}
-			frame, err := ReconstructFrame(nucleus, componentList)
+			frame, err := reconstructFrame(nucleus, componentList)
 			if err != nil {
 				c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
 				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
@@ -509,7 +511,7 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 		if err != nil {
 			return nil, err
 		}
-		frame, err := ReconstructFrame(nucleus, componentList)
+		frame, err := reconstructFrame(nucleus, componentList)
 		if err != nil {
 			c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
 			return nil, fmt.Errorf("reconstruct packet %d in capture %s: %w", row.packetID, captureID, err)

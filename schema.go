@@ -21,7 +21,25 @@ func applySchema(sql, table string) string {
 	return strings.ReplaceAll(sql, "{{ table }}", table)
 }
 
-// InitSchema creates the database and tables if they do not exist.
+// InitSchema creates the database and all caphouse tables if they do not
+// exist. It is safe to call on every startup — all statements use
+// CREATE TABLE IF NOT EXISTS / ADD INDEX IF NOT EXISTS.
+//
+// Tables created:
+//
+//   - pcap_captures — one row per ingested capture session.
+//   - pcap_packets — one row per packet; ts is a nanosecond offset from the
+//     capture's created_at so that absolute time = created_at + ts.
+//   - pcap_<protocol> — one table per registered [components.Component]
+//     (e.g. pcap_ethernet, pcap_ipv4, pcap_tcp). New components are picked
+//     up automatically via [components.ComponentFactories].
+//   - stream_captures — one row per observed TCP stream.
+//   - stream_http — reconstructed HTTP sessions from TCP stream reassembly.
+//
+// All tables use ReplacingMergeTree, making re-ingest of the same capture
+// idempotent: duplicate rows are deduplicated at merge time (or on read with
+// FINAL). The primary key / ORDER BY on each table is chosen to maximise
+// compression for that layer's column access patterns.
 func (c *Client) InitSchema(ctx context.Context) error {
 	if c.cfg.Database == "" {
 		return errors.New("database is required")

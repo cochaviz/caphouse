@@ -38,8 +38,10 @@ type CaptureMeta struct {
 	CodecProfile string
 }
 
+// Table implements clickhouseMapper.
 func (CaptureMeta) Table() string { return "pcap_captures" }
 
+// ClickhouseColumns implements clickhouseMapper.
 func (CaptureMeta) ClickhouseColumns() ([]string, error) {
 	return []string{
 		"capture_id", "sensor_id", "created_at",
@@ -48,6 +50,8 @@ func (CaptureMeta) ClickhouseColumns() ([]string, error) {
 	}, nil
 }
 
+// ClickhouseValues implements clickhouseMapper. A nil GlobalHeaderRaw is
+// replaced with an empty byte slice so ClickHouse does not reject the row.
 func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 	raw := m.GlobalHeaderRaw
 	if raw == nil {
@@ -60,6 +64,7 @@ func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 	}, nil
 }
 
+// ScanColumns implements clickhouseMapper.
 func (CaptureMeta) ScanColumns() []string {
 	return []string{
 		"capture_id", "sensor_id", "created_at",

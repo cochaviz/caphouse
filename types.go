@@ -24,9 +24,6 @@ type Config struct {
 	DisableStreamTracking bool
 }
 
-// PacketNucleus is an alias of the component nucleus type.
-type PacketNucleus = components.PacketNucleus
-
 // Packet holds one captured frame with metadata.
 type Packet struct {
 	CaptureID uuid.UUID
@@ -37,17 +34,25 @@ type Packet struct {
 	Frame     []byte
 }
 
-// CodecPacket bundles the nucleus with ClickHouse-mapped layer decoders.
-type CodecPacket struct {
-	Nucleus    PacketNucleus
+// codecPacket bundles the nucleus with ClickHouse-mapped layer decoders.
+type codecPacket struct {
+	Nucleus    components.PacketNucleus
 	Components []components.Component
 }
 
-// ClickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns
+// clickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns
 // for any type that is stored in ClickHouse.
-type ClickhouseMapper interface {
+type clickhouseMapper interface {
+	// Table returns the unqualified ClickHouse table name for this type.
 	Table() string
+	// ClickhouseColumns returns the ordered column names used in INSERT
+	// statements. Must align with ClickhouseValues.
 	ClickhouseColumns() ([]string, error)
+	// ClickhouseValues returns the ordered values to INSERT, aligned with
+	// ClickhouseColumns. nil slices should be replaced with empty equivalents
+	// so ClickHouse does not reject the row.
 	ClickhouseValues() ([]any, error)
+	// ScanColumns returns the ordered column names used in SELECT statements.
+	// Implementations must accept a matching Scan call with the same arity.
 	ScanColumns() []string
 }

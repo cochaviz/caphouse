@@ -65,7 +65,7 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
 		t.Fatalf("expected ethernet component")
 	}
@@ -81,7 +81,7 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 		t.Fatalf("raw tail mismatch")
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestCodecIPv6WithHopByHop(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("ipv6 component missing")
 	}
@@ -114,7 +114,7 @@ func TestCodecIPv6WithHopByHop(t *testing.T) {
 		t.Fatalf("ipv6 ext component missing")
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCodecNonIPFallback(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if hasComponentKind(encoded.Components, components.ComponentIPv4) || hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("expected no ip component")
 	}
@@ -144,7 +144,7 @@ func TestCodecNonIPFallback(t *testing.T) {
 		t.Fatalf("tail_offset mismatch: got %d want 14", encoded.Nucleus.TailOffset)
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestCodecRawLinkType(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeRaw, packet)
+	encoded := encodePacket(testLinkTypeRaw, packet)
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentEthernet) {
 		t.Fatalf("did not expect ethernet component")
 	}
@@ -178,7 +178,7 @@ func TestCodecRawLinkType(t *testing.T) {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, len(ipHeader))
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestCodecIPv4UDP(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !hasComponentKind(encoded.Components, components.ComponentEthernet) {
 		t.Fatalf("expected ethernet component")
 	}
@@ -240,7 +240,7 @@ func TestCodecIPv4UDP(t *testing.T) {
 	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestCodecIPv6UDP(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !hasComponentKind(encoded.Components, components.ComponentEthernet) {
 		t.Fatalf("expected ethernet component")
 	}
@@ -301,7 +301,7 @@ func TestCodecIPv6UDP(t *testing.T) {
 	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	ipComp := findComponent(encoded.Components, &components.IPv4Component{})
 	if ipComp == nil {
 		t.Fatalf("ipv4 component missing")
@@ -365,7 +365,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestCodecUnsupportedLinkType(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(9999, packet)
+	encoded := encodePacket(9999, packet)
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("expected raw frame fallback")
 	}
@@ -404,7 +404,7 @@ func TestCodecTailOffsetMismatch(t *testing.T) {
 		DstMAC:    []byte{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
 		EtherType: testEtherTypeIPv4,
 	}
-	_, err := ReconstructFrame(nucleus, []components.Component{l2})
+	_, err := reconstructFrame(nucleus, []components.Component{l2})
 	if err == nil {
 		t.Fatalf("expected tail_offset mismatch error")
 	}
@@ -422,7 +422,7 @@ func TestCodecTruncatedBit(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentTruncated) {
 		t.Fatalf("expected truncated bit")
 	}
@@ -481,7 +481,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 			t.Fatalf("read input packet: %v", err)
 		}
 
-		encoded := EncodePacket(uint32(meta.LinkType), Packet{
+		encoded := encodePacket(uint32(meta.LinkType), Packet{
 			CaptureID: uuid.New(),
 			PacketID:  packetID,
 			Timestamp: ci.Timestamp,
@@ -491,7 +491,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 		})
 		packetID++
 
-		reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+		reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 		if err != nil {
 			t.Fatalf("reconstruct: %v", err)
 		}
@@ -592,7 +592,7 @@ func TestDNSEncodeDecode(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
 		t.Fatalf("expected DNS component bit set")
@@ -635,7 +635,7 @@ func TestDNSEncodeDecode(t *testing.T) {
 		t.Fatalf("expected empty FrameRaw for DNS packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -690,7 +690,7 @@ func TestNTPEncodeDecode(t *testing.T) {
 		Frame:     frame,
 	}
 
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentNTP) {
 		t.Fatalf("expected NTP component bit set")
@@ -717,7 +717,7 @@ func TestNTPEncodeDecode(t *testing.T) {
 		t.Fatalf("expected empty FrameRaw for NTP packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestDNSTruncatedPayload(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
 		t.Fatalf("expected no DNS component for truncated payload")
@@ -781,7 +781,7 @@ func TestDNSTruncatedPayload(t *testing.T) {
 		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -832,7 +832,7 @@ func TestDNSMalformedQuestions(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentDNS) {
 		t.Fatalf("expected no DNS component for malformed questions")
@@ -854,7 +854,7 @@ func TestDNSMalformedQuestions(t *testing.T) {
 		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -897,7 +897,7 @@ func TestNTPTruncatedPayload(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentNTP) {
 		t.Fatalf("expected no NTP component for truncated payload")
@@ -919,7 +919,7 @@ func TestNTPTruncatedPayload(t *testing.T) {
 		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
 	}
 
-	reconstructed, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -1009,7 +1009,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentDot1Q) {
 		t.Fatalf("expected dot1q component bit")
 	}
@@ -1065,7 +1065,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("unexpected raw frame fallback")
 	}
@@ -1078,7 +1078,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -1121,7 +1121,7 @@ func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("unexpected raw frame fallback")
 	}
@@ -1150,7 +1150,7 @@ func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("unexpected raw-frame fallback for truncated UDP")
@@ -1173,7 +1173,7 @@ func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 		t.Fatalf("FrameRaw does not start with partial UDP bytes: %x", encoded.Nucleus.FrameRaw)
 	}
 
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -1204,7 +1204,7 @@ func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("unexpected raw-frame fallback for truncated TCP")
@@ -1227,7 +1227,7 @@ func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 		t.Fatalf("FrameRaw does not start with partial TCP bytes: %x", encoded.Nucleus.FrameRaw)
 	}
 
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
@@ -1255,7 +1255,7 @@ func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
 		OrigLen:   uint32(len(frame)),
 		Frame:     frame,
 	}
-	encoded := EncodePacket(testLinkTypeEthernet, packet)
+	encoded := encodePacket(testLinkTypeEthernet, packet)
 
 	if components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("unexpected raw-frame fallback for truncated IPv4")
@@ -1278,7 +1278,7 @@ func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
 		t.Fatalf("FrameRaw does not start with partial IPv4 bytes: %x", encoded.Nucleus.FrameRaw)
 	}
 
-	out, err := ReconstructFrame(encoded.Nucleus, encoded.Components)
+	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
 	}
