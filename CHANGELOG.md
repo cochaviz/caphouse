@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.3.1] - 2026-03-18
+
+### New Features
+
+- **`caphouse-watch-dir` script** — watches a directory for PCAP files
+  (`*.pcap`, `*.pcapng`), ingests each into ClickHouse when the writing
+  process closes the file, and removes it from disk on success. Useful as a
+  drop folder: any tool that writes PCAPs into the directory will have them
+  automatically drained and stored. Uses `inotifywait` on Linux and
+  polling + `lsof` on macOS. Installed alongside `caphouse-monitor` via
+  `caphouse install-scripts`.
+
 ## [v0.3.0] - 2026-03-11
 
 ### New Features
