@@ -24,6 +24,9 @@ import (
 //go:embed scripts/caphouse-monitor.sh
 var monitorScript []byte
 
+//go:embed scripts/caphouse-watch-dir.sh
+var watchScript []byte
+
 const longDescription = `caphouse stores and exports classic PCAP files in ClickHouse.
 
 Instead of writing raw frames to disk, it parses each packet into its protocol
@@ -213,13 +216,20 @@ func rootCmd() *cobra.Command {
 			if err := os.MkdirAll(scriptpath, 0o755); err != nil {
 				return err
 			}
-			monitorFileLocation := filepath.Join(scriptpath, "caphouse-monitor")
-			err := os.WriteFile(monitorFileLocation, monitorScript, os.FileMode(0755))
-
-			if err != nil {
-				return err
+			scripts := []struct {
+				name    string
+				content []byte
+			}{
+				{"caphouse-monitor", monitorScript},
+				{"caphouse-watch-dir", watchScript},
 			}
-			fmt.Printf("Installed caphouse-monitor to %s\n", monitorFileLocation)
+			for _, s := range scripts {
+				dest := filepath.Join(scriptpath, s.name)
+				if err := os.WriteFile(dest, s.content, os.FileMode(0755)); err != nil {
+					return err
+				}
+				fmt.Printf("Installed %s to %s\n", s.name, dest)
+			}
 			return nil
 		},
 	})
