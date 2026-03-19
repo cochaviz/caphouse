@@ -7,6 +7,10 @@
 # Useful as a "drop folder": configure any tool to write PCAPs into DIR, and
 # caphouse-watch will continuously drain and ingest them.
 #
+# If a ClickHouse ingest fails (e.g. network outage), the file is kept on disk.
+# A background retry loop re-attempts failed files every RETRY seconds so no
+# data is permanently lost due to transient connectivity issues.
+#
 # Dependencies: caphouse
 #   Linux: inotifywait (inotify-tools)
 #   macOS: lsof (pre-installed)
@@ -16,6 +20,7 @@ set -eu
 DSN="${CAPHOUSE_DSN:-}"
 SENSOR=
 DIR=
+RETRY=60
 
 usage() {
     cat <<EOF
@@ -28,15 +33,17 @@ Options:
   -D DIR       Directory to watch (required)
   -d DSN       ClickHouse DSN (default: \$CAPHOUSE_DSN)
   -s SENSOR    Sensor name (defaults to system hostname)
+  -r SECS      Interval between retry scans for failed ingests (default: $RETRY)
   -h           Show this help
 EOF
 }
 
-while getopts 'D:d:s:h' opt; do
+while getopts 'D:d:s:r:h' opt; do
     case $opt in
         D) DIR=$OPTARG ;;
         d) DSN=$OPTARG ;;
         s) SENSOR=$OPTARG ;;
+        r) RETRY=$OPTARG ;;
         h) usage; exit 0 ;;
         *) usage >&2; exit 1 ;;
     esac
@@ -71,6 +78,21 @@ ingest() {
 for f in "$DIR"/*.pcap "$DIR"/*.pcapng; do
     [ -f "$f" ] && ingest "$f"
 done
+
+# Background loop: retry files that failed to ingest (network outage recovery).
+# On Linux the inotifywait loop only fires on close_write and won't re-fire for
+# files whose ingest failed. This loop fills that gap by periodically rescanning.
+retry_failed() {
+    while true; do
+        sleep "$RETRY"
+        for f in "$DIR"/*.pcap "$DIR"/*.pcapng; do
+            [ -f "$f" ] && ingest "$f"
+        done
+    done
+}
+retry_failed &
+RETRY_PID=$!
+trap 'kill "$RETRY_PID" 2>/dev/null || true' EXIT INT TERM
 
 case "$(uname)" in
     Darwin)
