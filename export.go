@@ -3,6 +3,7 @@ package caphouse
 import (
 	"bufio"
 	"caphouse/components"
+	"caphouse/query"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -399,7 +400,7 @@ type timedPacketRef struct {
 // (absNs ASC, captureCreatedAt ASC, captureID ASC, packetID ASC).
 // When captureIDs is nil or empty, all captures are searched.
 func (c *Client) fetchSortedPacketRefs(ctx context.Context, captureIDs []uuid.UUID, from, to int64) ([]timedPacketRef, error) {
-	capScope := captureScope(captureIDs)
+	capScope := query.CaptureScope(captureIDs)
 	// PREWHERE created_at <= to prunes captures that started after the query
 	// window. We cannot apply a lower-bound prewhere because a capture that
 	// started before `from` can still have packets inside [from, to].
@@ -533,7 +534,7 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 //
 // f must contain a time filter; if it does not, an error is returned.
 // packetsWritten is incremented after each packet (may be nil).
-func (c *Client) ExportAllCapturesFiltered(ctx context.Context, f Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
+func (c *Client) ExportAllCapturesFiltered(ctx context.Context, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
 	from, to, ok := f.TimeRange()
 	if !ok {
 		return nil, 0, errors.New("--capture all requires a time range filter (e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z')")
@@ -584,7 +585,7 @@ func (c *Client) fetchCaptureMetaMap(ctx context.Context, captureIDs []uuid.UUID
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s FINAL WHERE %s",
-		cols, c.capturesTable(), captureInSQL(captureIDs),
+		cols, c.capturesTable(), query.CaptureInSQL(captureIDs),
 	)
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
