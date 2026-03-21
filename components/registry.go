@@ -19,6 +19,7 @@ var LayerEncoders = map[gopacket.LayerType]Component{
 	layers.LayerTypeUDP:             &UDPComponent{},
 	layers.LayerTypeDNS:             &DNSComponent{},
 	layers.LayerTypeNTP:             &NTPComponent{},
+	layers.LayerTypeARP:             &ARPComponent{},
 }
 
 func LayerSupported(layerType gopacket.LayerType) bool {

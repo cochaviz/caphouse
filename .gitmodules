@@ -1,0 +1,3 @@
+[submodule "caphouse-ui"]
+	path = caphouse-ui
+	url = git@github.com:cochaviz/caphouse-ui.git

@@ -31,6 +31,7 @@ const (
 	ComponentUDP
 	ComponentDNS
 	ComponentNTP
+	ComponentARP
 )
 
 const (
@@ -53,6 +54,7 @@ var KnownComponentKinds = []uint{
 	ComponentUDP,
 	ComponentDNS,
 	ComponentNTP,
+	ComponentARP,
 }
 
 var OrderRepeatable = map[uint]bool{
@@ -200,6 +202,7 @@ var ComponentFactories = map[uint]func() Component{
 	ComponentUDP:      func() Component { return &UDPComponent{} },
 	ComponentDNS:      func() Component { return &DNSComponent{} },
 	ComponentNTP:      func() Component { return &NTPComponent{} },
+	ComponentARP:      func() Component { return &ARPComponent{} },
 }
 
 func GetClickhouseValuesFrom(v any) ([]any, error) {
