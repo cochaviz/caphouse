@@ -42,11 +42,11 @@
 //	io.Copy(out, rc)
 //
 //	// Filter and export
-//	q, _ := caphouse.ParseQuery("host 10.0.0.1 and port 443")
+//	q, _ := query.ParseQuery("host 10.0.0.1 and port 443")
 //	rc, total, err := c.ExportCaptureFiltered(ctx, captureID, q, nil)
 //
 //	// Merge all captures within a time window
-//	q, _ := caphouse.ParseQuery("time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z")
+//	q, _ := query.ParseQuery("time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z")
 //	rc, total, err := c.ExportAllCapturesFiltered(ctx, q, nil)
 //
 // # Ingest pipeline
@@ -68,8 +68,8 @@
 //
 // # Query and export pipeline
 //
-// Filter expressions follow a tcpdump-style syntax parsed by [ParseQuery].
-// The resulting [Query] is compiled into a ClickHouse subquery by each node in
+// Filter expressions follow a tcpdump-style syntax parsed by [query.ParseQuery].
+// The resulting [query.Query] is compiled into a ClickHouse subquery by each node in
 // the AST and executed via INTERSECT / UNION DISTINCT / EXCEPT set operations.
 // [Client.GenerateSQL] and [Client.GenerateSQLForCaptures] render the same
 // query as a human-readable SELECT for inspection or further customisation.

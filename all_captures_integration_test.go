@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"caphouse/query"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -289,7 +291,7 @@ func TestExportAllStabilityWithinCapture(t *testing.T) {
 // ExportAllCapturesFiltered function rejects a query without a time node.
 func TestExportAllRequiresTimeRangeIntegration(t *testing.T) {
 	c := &Client{}
-	q, _ := ParseQuery("host 1.2.3.4")
+	q, _ := query.ParseQuery("host 1.2.3.4")
 	_, _, err := c.ExportAllCapturesFiltered(context.Background(), q, nil)
 	if err == nil {
 		t.Fatal("expected error for query without time range, got nil")

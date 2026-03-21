@@ -12,6 +12,15 @@ services:
             clickhouse:
                 condition: service_healthy
 
+    caphouse-ui:
+        image: node:lts
+        volumes:
+            - ..:/workspace:cached
+        working_dir: /workspace/caphouse-ui
+        command: sh -c "npm install && npm run dev"
+        ports:
+            - "8080:8080"
+
     clickhouse:
         image: clickhouse/clickhouse-server
         ports:

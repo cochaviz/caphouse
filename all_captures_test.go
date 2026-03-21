@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"caphouse/query"
+
 	"github.com/google/uuid"
 )
 
@@ -63,9 +65,9 @@ func TestTimeRangeExtraction(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			q, err := ParseQuery(tc.expr)
+			q, err := query.ParseQuery(tc.expr)
 			if err != nil {
-				t.Fatalf("ParseQuery: %v", err)
+				t.Fatalf("query.ParseQuery: %v", err)
 			}
 			from, to, ok := q.TimeRange()
 			if ok != tc.wantOk {
@@ -190,9 +192,9 @@ func TestTimedRefStabilityWithinCapture(t *testing.T) {
 // rejects queries that do not contain a time filter.
 func TestExportAllRequiresTimeRange(t *testing.T) {
 	c := &Client{} // no real connection needed; we expect early failure
-	q, err := ParseQuery("host 1.2.3.4")
+	q, err := query.ParseQuery("host 1.2.3.4")
 	if err != nil {
-		t.Fatalf("ParseQuery: %v", err)
+		t.Fatalf("query.ParseQuery: %v", err)
 	}
 	_, _, err = c.ExportAllCapturesFiltered(context.Background(), q, nil)
 	if err == nil {

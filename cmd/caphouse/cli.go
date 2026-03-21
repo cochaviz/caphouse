@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"caphouse"
+	"caphouse/query"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -254,7 +255,7 @@ func splitComponents(raw string) []string {
 }
 
 func runExplain(cmd *cobra.Command, cfg config) error {
-	q, err := caphouse.ParseQuery(cfg.queryExpr)
+	q, err := query.ParseQuery(cfg.queryExpr)
 	if err != nil {
 		return fmt.Errorf("parse filter: %w", err)
 	}
@@ -407,7 +408,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 		if cfg.queryExpr == "" {
 			return errors.New("--capture all requires a --query with a time range filter")
 		}
-		f, err := caphouse.ParseQuery(cfg.queryExpr)
+		f, err := query.ParseQuery(cfg.queryExpr)
 		if err != nil {
 			return fmt.Errorf("parse filter: %w", err)
 		}
@@ -450,7 +451,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	var totalPackets int64
 
 	if cfg.queryExpr != "" {
-		f, err := caphouse.ParseQuery(cfg.queryExpr)
+		f, err := query.ParseQuery(cfg.queryExpr)
 		if err != nil {
 			return fmt.Errorf("parse filter: %w", err)
 		}
