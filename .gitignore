@@ -13,3 +13,4 @@ completions/
 
 # dev
 .zed/
+tmp/
