@@ -1,90 +1,12 @@
 package caphouse
 
 import (
-	"context"
 	"sort"
 	"testing"
 	"time"
 
-	"caphouse/query"
-
 	"github.com/google/uuid"
 )
-
-// TestTimeRangeExtraction verifies that TimeRange correctly extracts bounds
-// from simple and compound query expressions.
-func TestTimeRangeExtraction(t *testing.T) {
-	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	t1 := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
-	t3 := time.Date(2024, 1, 4, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name      string
-		expr      string
-		wantOk    bool
-		wantFrom  int64
-		wantTo    int64
-	}{
-		{
-			name:     "simple time range",
-			expr:     "time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z",
-			wantOk:   true,
-			wantFrom: t0.UnixNano(),
-			wantTo:   t1.UnixNano(),
-		},
-		{
-			name:   "no time node",
-			expr:   "host 1.2.3.4",
-			wantOk: false,
-		},
-		{
-			name:     "time AND host extracts time",
-			expr:     "time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z and host 1.2.3.4",
-			wantOk:   true,
-			wantFrom: t0.UnixNano(),
-			wantTo:   t1.UnixNano(),
-		},
-		{
-			name: "AND of two time ranges uses intersection",
-			// from = max(t0, t1) = t1; to = min(t2, t3) = t2
-			expr:     "time 2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z and time 2024-01-02T00:00:00Z to 2024-01-04T00:00:00Z",
-			wantOk:   true,
-			wantFrom: t1.UnixNano(),
-			wantTo:   t2.UnixNano(),
-		},
-		{
-			name: "OR of two time ranges uses union",
-			// from = min(t0, t2) = t0; to = max(t1, t3) = t3
-			expr:     "time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z or time 2024-01-03T00:00:00Z to 2024-01-04T00:00:00Z",
-			wantOk:   true,
-			wantFrom: t0.UnixNano(),
-			wantTo:   t3.UnixNano(),
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			q, err := query.ParseQuery(tc.expr)
-			if err != nil {
-				t.Fatalf("query.ParseQuery: %v", err)
-			}
-			from, to, ok := q.TimeRange()
-			if ok != tc.wantOk {
-				t.Fatalf("TimeRange ok = %v, want %v", ok, tc.wantOk)
-			}
-			if !tc.wantOk {
-				return
-			}
-			if from != tc.wantFrom {
-				t.Errorf("from = %d, want %d", from, tc.wantFrom)
-			}
-			if to != tc.wantTo {
-				t.Errorf("to = %d, want %d", to, tc.wantTo)
-			}
-		})
-	}
-}
 
 // sortTimedRefs sorts a slice of timedPacketRef by the merge key:
 // (absNs ASC, captureCreatedAt ASC, captureID ASC, packetID ASC).
@@ -188,16 +110,3 @@ func TestTimedRefStabilityWithinCapture(t *testing.T) {
 	}
 }
 
-// TestExportAllRequiresTimeRange verifies that ExportAllCapturesFiltered
-// rejects queries that do not contain a time filter.
-func TestExportAllRequiresTimeRange(t *testing.T) {
-	c := &Client{} // no real connection needed; we expect early failure
-	q, err := query.ParseQuery("host 1.2.3.4")
-	if err != nil {
-		t.Fatalf("query.ParseQuery: %v", err)
-	}
-	_, _, err = c.ExportAllCapturesFiltered(context.Background(), q, nil)
-	if err == nil {
-		t.Fatal("expected error for query without time range, got nil")
-	}
-}

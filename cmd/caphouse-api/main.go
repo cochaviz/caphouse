@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"caphouse"
+	"caphouse/geoip"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -26,6 +27,10 @@ func main() {
 func rootCmd() *cobra.Command {
 	var dsn string
 	var addr string
+	var geoipSource string
+	var geoipSourceV6 string
+	var asnSource string
+	var asnSourceV6 string
 	var debug bool
 
 	cmd := &cobra.Command{
@@ -39,6 +44,18 @@ func rootCmd() *cobra.Command {
 			}
 			if dsn == "" {
 				return fmt.Errorf("dsn is required (--dsn or CAPHOUSE_DSN)")
+			}
+			if geoipSource == "" {
+				geoipSource = os.Getenv("CAPHOUSE_GEOIP_SOURCE")
+			}
+			if geoipSourceV6 == "" {
+				geoipSourceV6 = os.Getenv("CAPHOUSE_GEOIP_SOURCE_V6")
+			}
+			if asnSource == "" {
+				asnSource = os.Getenv("CAPHOUSE_ASN_SOURCE")
+			}
+			if asnSourceV6 == "" {
+				asnSourceV6 = os.Getenv("CAPHOUSE_ASN_SOURCE_V6")
 			}
 
 			level := slog.LevelInfo
@@ -57,6 +74,22 @@ func rootCmd() *cobra.Command {
 				return fmt.Errorf("connect to ClickHouse: %w", err)
 			}
 			defer client.Close()
+
+			geoCfg := geoip.InitConfig{
+				CityV4: geoipSource,
+				CityV6: geoipSourceV6,
+				ASNV4:  asnSource,
+				ASNV6:  asnSourceV6,
+			}
+			if geoCfg.CityV4 != "" || geoCfg.CityV6 != "" || geoCfg.ASNV4 != "" || geoCfg.ASNV6 != "" {
+				logger.Info("initialising geoip dictionaries",
+					"city_v4", geoCfg.CityV4, "city_v6", geoCfg.CityV6,
+					"asn_v4", geoCfg.ASNV4, "asn_v6", geoCfg.ASNV6)
+				if err := client.InitGeoIP(ctx, geoCfg); err != nil {
+					return fmt.Errorf("init geoip: %w", err)
+				}
+				logger.Info("geoip dictionaries ready")
+			}
 
 			r := chi.NewRouter()
 			r.Use(middleware.RealIP)
@@ -81,6 +114,10 @@ func rootCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "ClickHouse DSN, e.g. clickhouse://user:pass@host:9000/db (or CAPHOUSE_DSN)")
 	cmd.Flags().StringVarP(&addr, "addr", "a", ":8080", "TCP address to listen on")
+	cmd.Flags().StringVar(&geoipSource, "geoip-source", "", "URL of a DB-IP city IPv4 CSV (or CAPHOUSE_GEOIP_SOURCE)")
+	cmd.Flags().StringVar(&geoipSourceV6, "geoip-source-v6", "", "URL of a DB-IP city IPv6 CSV (or CAPHOUSE_GEOIP_SOURCE_V6)")
+	cmd.Flags().StringVar(&asnSource, "asn-source", "", "URL of a DB-IP ASN IPv4 CSV (or CAPHOUSE_ASN_SOURCE)")
+	cmd.Flags().StringVar(&asnSourceV6, "asn-source-v6", "", "URL of a DB-IP ASN IPv6 CSV (or CAPHOUSE_ASN_SOURCE_V6)")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging")
 
 	return cmd

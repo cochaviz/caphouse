@@ -3,7 +3,13 @@ tmp_dir = "tmp"
 
 [build]
   cmd = "go build -o ./tmp/caphouse-api ./cmd/caphouse-api"
-  entrypoint = ["./tmp/caphouse-api", "--addr", "0.0.0.0:8081"]
+  entrypoint = [
+    "./tmp/caphouse-api", "--addr", "0.0.0.0:8081", 
+    "--geoip-source", "https://raw.githubusercontent.com/sapics/ip-location-db/master/dbip-city/dbip-city-ipv4.csv.gz", 
+    "--geoip-source-v6", "https://raw.githubusercontent.com/sapics/ip-location-db/master/dbip-city/dbip-city-ipv6.csv.gz", 
+    "--asn-source", "https://raw.githubusercontent.com/sapics/ip-location-db/master/dbip-asn/dbip-asn-ipv4.csv", 
+    "--asn-source-v6", "https://raw.githubusercontent.com/sapics/ip-location-db/master/dbip-asn/dbip-asn-ipv6.csv",
+  ]
   include_ext = ["go"]
   exclude_dir = ["tmp", "vendor", "caphouse-ui"]
   exclude_regex = ["_test\\.go$"]

@@ -74,14 +74,8 @@ func (c *NTPComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *NTPComponent) ScanColumns() []string {
-	return []string{
-		"packet_id",
-		"leap_indicator", "version", "mode", "stratum", "poll", "precision",
-		"root_delay", "root_dispersion", "reference_id",
-		"reference_ts", "origin_ts", "receive_ts", "transmit_ts",
-		"ntp_raw",
-	}
+func (c *NTPComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *NTPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {

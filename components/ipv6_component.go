@@ -28,13 +28,13 @@ type IPv6Component struct {
 
 	Protocol uint8 `ch:"protocol"`
 
-	SrcIP6 netip.Addr `ch:"src_ip_v6"`
-	DstIP6 netip.Addr `ch:"dst_ip_v6"`
+	SrcIP6 netip.Addr `ch:"src"`
+	DstIP6 netip.Addr `ch:"dst"`
 
-	IPv6PayloadLen   uint16 `ch:"ipv6_payload_len"`
-	IPv6HopLimit     uint8  `ch:"ipv6_hop_limit"`
-	IPv6FlowLabel    uint32 `ch:"ipv6_flow_label"`
-	IPv6TrafficClass uint8  `ch:"ipv6_traffic_class"`
+	IPv6PayloadLen   uint16 `ch:"payload_len"`
+	IPv6HopLimit     uint8  `ch:"hop_limit"`
+	IPv6FlowLabel    uint32 `ch:"flow_label"`
+	IPv6TrafficClass uint8  `ch:"traffic_class"`
 }
 
 func (c *IPv6Component) Kind() uint           { return ComponentIPv6 }
@@ -83,12 +83,8 @@ func (c *IPv6Component) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *IPv6Component) ScanColumns() []string {
-	return []string{
-		"packet_id", "parsed_ok", "parse_err", "protocol",
-		"src_ip_v6", "dst_ip_v6",
-		"ipv6_payload_len", "ipv6_hop_limit", "ipv6_flow_label", "ipv6_traffic_class",
-	}
+func (c *IPv6Component) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *IPv6Component) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
@@ -137,7 +133,7 @@ func (c *IPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *IPv6Component) Schema(table string) string { return applySchema(ipv6SchemaSQL, table) }
 func (c *IPv6Component) Indexes(table string) []string {
 	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_v6 (dst_ip_v6) TYPE bloom_filter GRANULARITY 4", table),
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),
 	}
 }

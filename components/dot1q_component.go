@@ -22,7 +22,7 @@ type Dot1QComponent struct {
 	Priority     uint8     `ch:"priority"`
 	DropEligible uint8     `ch:"drop_eligible"`
 	VLANID       uint16    `ch:"vlan_id"`
-	EtherType    uint16    `ch:"eth_type"`
+	EtherType    uint16    `ch:"type"`
 }
 
 func (c *Dot1QComponent) Kind() uint              { return ComponentDot1Q }
@@ -61,8 +61,8 @@ func (c *Dot1QComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *Dot1QComponent) ScanColumns() []string {
-	return []string{"packet_id", "tag_index", "priority", "drop_eligible", "vlan_id", "eth_type"}
+func (c *Dot1QComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *Dot1QComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {

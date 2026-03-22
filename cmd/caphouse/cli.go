@@ -71,7 +71,12 @@ Examples:
 
   # Export all captures within a time window, merged and sorted by time
   caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=all \
-    --query="time 2024-01-01T00:00:00Z to 2024-01-01T01:00:00Z" merged.pcap
+    --from=2024-01-01T00:00:00Z --to=2024-01-01T01:00:00Z merged.pcap
+
+  # Export all captures in a time window, filtered by destination IP
+  caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=all \
+    --from=2024-01-01T00:00:00Z --to=2024-01-01T01:00:00Z \
+    --query="ipv4.dst = '1.1.1.1'" merged.pcap
 
   # Suppress all progress output (useful in scripts)
   caphouse -s --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost capture.pcap`
@@ -89,6 +94,8 @@ type config struct {
 	sensor        string
 	queryExpr     string
 	components    []string
+	fromTime      time.Time
+	toTime        time.Time
 	debug         bool
 	silent        bool
 	noStreams      bool
@@ -110,6 +117,8 @@ func rootCmd() *cobra.Command {
 	var sensor string
 	var queryExpr string
 	var componentsRaw string
+	var fromStr string
+	var toStr string
 	var debug bool
 	var silent bool
 	var noStreams bool
@@ -151,6 +160,20 @@ func rootCmd() *cobra.Command {
 				silent:        silent,
 				noStreams:      noStreams,
 			}
+			if fromStr != "" {
+				t, err := time.Parse(time.RFC3339, fromStr)
+				if err != nil {
+					return fmt.Errorf("--from: %w", err)
+				}
+				cfg.fromTime = t
+			}
+			if toStr != "" {
+				t, err := time.Parse(time.RFC3339, toStr)
+				if err != nil {
+					return fmt.Errorf("--to: %w", err)
+				}
+				cfg.toTime = t
+			}
 			if cfg.dsn == "" {
 				return errors.New("dsn is required (flag --dsn or env CAPHOUSE_DSN)")
 			}
@@ -175,8 +198,10 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
 	cmd.Flags().StringVarP(&capture, "capture", "c", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture; defaults to system hostname in read mode")
-	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "filter expression (tcpdump-style); without --write prints equivalent SQL, with --write exports filtered PCAP")
+	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "ClickHouse WHERE clause filter (e.g. 'ipv4.dst = \\'1.1.1.1\\' AND tcp.dst = 443'); without --write prints equivalent SQL")
 	cmd.Flags().StringVarP(&componentsRaw, "components", "C", "", "comma-separated component tables to JOIN (e.g. ipv4,tcp,udp); only valid with --query")
+	cmd.Flags().StringVar(&fromStr, "from", "", "start of time window for --capture all (RFC 3339, e.g. 2024-01-01T00:00:00Z)")
+	cmd.Flags().StringVar(&toStr, "to", "", "end of time window for --capture all (RFC 3339, e.g. 2024-01-02T00:00:00Z)")
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if err == nil {
@@ -403,17 +428,13 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	ctx := context.Background()
 	logger := newLogger(cfg.debug, cfg.silent)
 
-	// --capture all: merge all captures within the query's time range.
+	// --capture all: merge all captures within the given time window.
 	if cfg.capture == "all" {
-		if cfg.queryExpr == "" {
-			return errors.New("--capture all requires a --query with a time range filter")
+		if cfg.fromTime.IsZero() || cfg.toTime.IsZero() {
+			return errors.New("--capture all requires --from and --to time bounds")
 		}
-		f, err := query.ParseQuery(cfg.queryExpr)
-		if err != nil {
-			return fmt.Errorf("parse filter: %w", err)
-		}
-		if _, _, ok := f.TimeRange(); !ok {
-			return errors.New("--capture all requires a time range in the filter (e.g. 'time X to Y')")
+		if !cfg.fromTime.Before(cfg.toTime) {
+			return errors.New("--from must be before --to")
 		}
 		client, err := newClient(ctx, cfg, logger)
 		if err != nil {
@@ -422,16 +443,16 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 		defer client.Close()
 
 		logger.Warn("exporting all captures in time range; this may produce large output",
-			"filter", cfg.queryExpr)
+			"from", cfg.fromTime, "to", cfg.toTime)
 
 		var p ingestProgress
-		rc, totalPackets, err := client.ExportAllCapturesFiltered(ctx, f, &p.packets)
+		rc, totalPackets, err := client.ExportAllCapturesFiltered(ctx, cfg.fromTime, cfg.toTime, query.Query{}, &p.packets)
 		if err != nil {
 			return err
 		}
 		defer rc.Close()
 
-		logger.Info("exporting all captures", "filter", cfg.queryExpr, "matched", totalPackets)
+		logger.Info("exporting all captures", "from", cfg.fromTime, "to", cfg.toTime, "matched", totalPackets)
 		return writeOutput(cmd, cfg, rc, "all", totalPackets, &p, logger)
 	}
 

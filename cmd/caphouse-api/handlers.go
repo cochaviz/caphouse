@@ -2,25 +2,44 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	"caphouse"
+	"caphouse/geoip"
 	"caphouse/query"
 
+	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 )
 
+// queryError returns a 422 huma error when err is a ClickHouse Exception
+// (i.e. the user's query is syntactically or semantically invalid), and nil
+// otherwise (letting the caller fall through to a generic 500).
+func queryError(err error) error {
+	var ex *clickhouse.Exception
+	if errors.As(err, &ex) {
+		return huma.Error422UnprocessableEntity(fmt.Sprintf("invalid query: %s", ex.Message))
+	}
+	return nil
+}
+
 // SearchInput is the request body for POST /v1/search.
 type SearchInput struct {
 	Body struct {
-		// Query is a tcpdump-style filter expression.
-		// Supported primitives: host <ip>, src/dst host <ip>, port <n>,
-		// src/dst port <n>, time <rfc3339> to <rfc3339>.
-		// Combine with and, or, not, and parentheses.
-		Query string `json:"query" required:"true" doc:"tcpdump-style filter expression, e.g. 'host 1.2.3.4 and port 80'"`
+		// Query is a ClickHouse WHERE clause body referencing component tables
+		// by name, e.g. "ipv4.dst = '1.1.1.1' AND tcp.dst = 443".
+		// An empty query matches all packets.
+		Query string `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
+
+		// From and To bound the search to a time window (RFC 3339).
+		// Both must be provided together; when omitted all time is searched.
+		From time.Time `json:"from,omitempty" doc:"Start of the time window (RFC 3339). Requires 'to'."`
+		To   time.Time `json:"to,omitempty" doc:"End of the time window (RFC 3339). Requires 'from'."`
 
 		// CaptureIDs restricts the search to specific captures.
 		// When empty or omitted, all captures are searched.
@@ -28,8 +47,8 @@ type SearchInput struct {
 
 		// Components lists protocol component tables to LEFT JOIN into the result,
 		// e.g. ["ipv4", "tcp"]. Valid values: ethernet, dot1q, linuxsll, ipv4,
-		// ipv6, ipv6_ext, tcp, udp, dns, ntp.
-		Components []string `json:"components,omitempty" doc:"Protocol component tables to include in the result (e.g. ipv4, tcp, udp, dns). Valid values: ethernet, dot1q, linuxsll, ipv4, ipv6, ipv6_ext, tcp, udp, dns, ntp."`
+		// ipv6, ipv6_ext, tcp, udp, dns, ntp, arp.
+		Components []string `json:"components,omitempty" doc:"Protocol component tables to include in the result (e.g. ipv4, tcp, udp, dns). Valid values: ethernet, dot1q, linuxsll, ipv4, ipv6, ipv6_ext, tcp, udp, dns, ntp, arp."`
 
 		// Limit is the page size. Defaults to 1000; maximum 10000.
 		Limit int `json:"limit,omitempty" doc:"Page size (default: 1000, max: 10000)."`
@@ -55,14 +74,23 @@ type SearchOutput struct {
 // CountsInput is the request body for POST /v1/stats/counts.
 type CountsInput struct {
 	Body struct {
-		// Query is a tcpdump-style filter expression (same syntax as /v1/search).
-		Query string `json:"query" required:"true" doc:"tcpdump-style filter expression, e.g. 'host 1.2.3.4 and port 80'"`
+		// Query is a ClickHouse WHERE clause body (same syntax as /v1/search).
+		Query string `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
+
+		// From and To bound the histogram to a time window (RFC 3339).
+		// Both must be provided together; when omitted all time is searched.
+		From time.Time `json:"from,omitempty" doc:"Start of the time window (RFC 3339). Requires 'to'."`
+		To   time.Time `json:"to,omitempty" doc:"End of the time window (RFC 3339). Requires 'from'."`
 
 		// CaptureIDs restricts the search to specific captures.
 		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of capture UUIDs to restrict the search. Searches all captures when omitted."`
 
 		// BinSeconds is the histogram bin width in seconds. Defaults to 60.
 		BinSeconds int64 `json:"bin_seconds,omitempty" doc:"Bin width in seconds (default: 60, minimum: 1)."`
+
+		// TzOffsetSeconds is the client's UTC offset in seconds (e.g. 7200 for UTC+2).
+		// Used to align daily (and other) bins to local midnight instead of UTC midnight.
+		TzOffsetSeconds int64 `json:"tz_offset_seconds,omitempty" doc:"Client UTC offset in seconds (e.g. 7200 for UTC+2). Aligns bins to local midnight."`
 	}
 }
 
@@ -90,23 +118,51 @@ type PacketDetailsOutput struct {
 	}
 }
 
+// PacketFrameInput is the request for GET /v1/captures/{capture_id}/packets/{packet_id}/frame.
+type PacketFrameInput struct {
+	CaptureID string `path:"capture_id" doc:"UUID of the capture."`
+	PacketID  uint64 `path:"packet_id" doc:"Packet ID within the capture."`
+}
+
+// PacketFrameOutput is the response for GET /v1/captures/{capture_id}/packets/{packet_id}/frame.
+type PacketFrameOutput struct {
+	Body struct {
+		Hex string `json:"hex" doc:"Reconstructed frame bytes as a lowercase hex string."`
+	}
+}
+
 // ExportCaptureInput is the request for POST /v1/captures/{capture_id}/export.
 type ExportCaptureInput struct {
 	// CaptureID is the UUID of the capture to export.
 	CaptureID string `path:"capture_id" doc:"UUID of the capture to export."`
 
 	Body struct {
-		// Query is an optional filter. When omitted all packets are exported.
-		Query string `json:"query,omitempty" doc:"Optional tcpdump-style filter. All packets are exported when omitted."`
+		// Query is an optional ClickHouse WHERE clause. When omitted all packets are exported.
+		Query string `json:"query,omitempty" doc:"Optional ClickHouse WHERE clause. All packets are exported when omitted."`
 	}
 }
 
 // ExportAllInput is the request for POST /v1/export.
 type ExportAllInput struct {
 	Body struct {
-		// Query must contain a time range filter.
-		Query string `json:"query" required:"true" doc:"tcpdump-style filter with a required time range, e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z and host 1.2.3.4'"`
+		// From is the start of the time window (RFC 3339).
+		From time.Time `json:"from" required:"true" doc:"Start of the time window (RFC 3339), e.g. '2024-01-01T00:00:00Z'."`
+
+		// To is the end of the time window (RFC 3339).
+		To time.Time `json:"to" required:"true" doc:"End of the time window (RFC 3339), e.g. '2024-01-02T00:00:00Z'."`
+
+		// Query is an optional ClickHouse WHERE clause to further filter packets.
+		Query string `json:"query,omitempty" doc:"Optional ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1'\""`
 	}
+}
+
+// timeRangeNs returns fromNs and toNs for a From/To pair.
+// Returns 0, 0 when either is zero (unset).
+func timeRangeNs(from, to time.Time) (fromNs, toNs int64) {
+	if from.IsZero() || to.IsZero() {
+		return 0, 0
+	}
+	return from.UnixNano(), to.UnixNano()
 }
 
 // registerHandlers registers all API routes on the given huma.API.
@@ -117,7 +173,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Method:      "POST",
 		Path:        "/v1/search",
 		Summary:     "Search packets",
-		Description: "Filter packets across one or more captures using a tcpdump-style expression. " +
+		Description: "Filter packets across one or more captures using a ClickHouse WHERE clause. " +
 			"Returns JSON rows with basic packet metadata (capture_id, packet_id, timestamp_ns, incl_len, orig_len) " +
 			"plus any protocol component fields requested via the components list.",
 		Tags: []string{"search"},
@@ -136,8 +192,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		if limit <= 0 || limit > 10000 {
 			limit = 1000
 		}
-		packets, err := client.QueryJSON(ctx, captureIDs, q, input.Body.Components, limit, input.Body.Offset)
+		fromNs, toNs := timeRangeNs(input.Body.From, input.Body.To)
+		packets, err := client.QueryJSON(ctx, captureIDs, q, input.Body.Components, limit, input.Body.Offset, fromNs, toNs)
 		if err != nil {
+			if qerr := queryError(err); qerr != nil {
+				return nil, qerr
+			}
 			return nil, fmt.Errorf("search: %w", err)
 		}
 		if packets == nil {
@@ -176,8 +236,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			binSeconds = 60
 		}
 
-		bins, err := client.QueryCounts(ctx, captureIDs, q, binSeconds)
+		fromNs, toNs := timeRangeNs(input.Body.From, input.Body.To)
+		bins, err := client.QueryCounts(ctx, captureIDs, q, binSeconds, fromNs, toNs, input.Body.TzOffsetSeconds)
 		if err != nil {
+			if qerr := queryError(err); qerr != nil {
+				return nil, qerr
+			}
 			return nil, fmt.Errorf("counts: %w", err)
 		}
 		if bins == nil {
@@ -215,6 +279,31 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		return out, nil
 	})
 
+	// GET /v1/captures/{capture_id}/packets/{packet_id}/frame
+	huma.Register(api, huma.Operation{
+		OperationID: "get-packet-frame",
+		Method:      "GET",
+		Path:        "/v1/captures/{capture_id}/packets/{packet_id}/frame",
+		Summary:     "Get reconstructed packet frame",
+		Description: "Returns the fully reconstructed original frame bytes as a hex string.",
+		Tags:        []string{"search"},
+	}, func(ctx context.Context, input *PacketFrameInput) (*PacketFrameOutput, error) {
+		captureID, err := uuid.Parse(input.CaptureID)
+		if err != nil {
+			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
+		}
+		frame, err := client.QueryPacketFrame(ctx, captureID, input.PacketID)
+		if err != nil {
+			return nil, fmt.Errorf("get packet frame: %w", err)
+		}
+		if frame == nil {
+			return nil, huma.Error404NotFound("packet not found")
+		}
+		out := &PacketFrameOutput{}
+		out.Body.Hex = fmt.Sprintf("%x", frame)
+		return out, nil
+	})
+
 	// POST /v1/captures/{capture_id}/export
 	huma.Register(api, huma.Operation{
 		OperationID: "export-capture",
@@ -222,7 +311,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Path:        "/v1/captures/{capture_id}/export",
 		Summary:     "Export capture as PCAP",
 		Description: "Stream a stored capture as a classic PCAP file (application/vnd.tcpdump.pcap). " +
-			"An optional filter expression restricts which packets are included. " +
+			"An optional ClickHouse WHERE clause restricts which packets are included. " +
 			"When no filter is provided the entire capture is exported.",
 		Tags: []string{"export"},
 	}, func(ctx context.Context, input *ExportCaptureInput) (*huma.StreamResponse, error) {
@@ -265,24 +354,21 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Method:      "POST",
 		Path:        "/v1/export",
 		Summary:     "Export all captures as merged PCAP",
-		Description: "Stream packets from all captures that match the filter as a single time-sorted PCAP file. " +
-			"The query must include a time range (e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z'). " +
+		Description: "Stream packets from all captures within the given time window as a single time-sorted PCAP file. " +
+			"An optional ClickHouse WHERE clause can further filter packets. " +
 			"The X-Total-Packets response header reports the number of matched packets.",
 		Tags: []string{"export"},
 	}, func(ctx context.Context, input *ExportAllInput) (*huma.StreamResponse, error) {
-		q, err := query.ParseQuery(input.Body.Query)
+		if !input.Body.From.Before(input.Body.To) {
+			return nil, huma.Error400BadRequest("'from' must be before 'to'")
+		}
+
+		f, err := query.ParseQuery(input.Body.Query)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
-
-		if _, _, ok := q.TimeRange(); !ok {
-			return nil, huma.Error400BadRequest(
-				"query must include a time range (e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z')",
-			)
-		}
-
 		var written atomic.Int64
-		rc, total, err := client.ExportAllCapturesFiltered(ctx, q, &written)
+		rc, total, err := client.ExportAllCapturesFiltered(ctx, input.Body.From, input.Body.To, f, &written)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
@@ -297,6 +383,30 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 				io.Copy(w, rc) //nolint:errcheck
 			},
 		}, nil
+	})
+
+	// POST /v1/geoip/batch
+	type GeoIPBatchInput struct {
+		Body struct {
+			IPs []string `json:"ips" doc:"List of IP addresses to look up"`
+		}
+	}
+	type GeoIPBatchOutput struct {
+		Body map[string]geoip.GeoInfo `doc:"Map of IP address to geolocation and ASN info"`
+	}
+	huma.Register(api, huma.Operation{
+		OperationID: "geoip-batch",
+		Method:      "POST",
+		Path:        "/v1/geoip/batch",
+		Summary:     "Batch IP geolocation",
+		Description: "Look up country codes for a list of IP addresses using the ClickHouse ip_trie dictionary.",
+		Tags:        []string{"geoip"},
+	}, func(ctx context.Context, input *GeoIPBatchInput) (*GeoIPBatchOutput, error) {
+		result, err := client.GeoIPLookupBatch(ctx, input.Body.IPs)
+		if err != nil {
+			return nil, fmt.Errorf("geoip batch: %w", err)
+		}
+		return &GeoIPBatchOutput{Body: result}, nil
 	})
 }
 

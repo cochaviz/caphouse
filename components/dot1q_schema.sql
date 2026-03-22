@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   priority      UInt8,
   drop_eligible UInt8,
   vlan_id       UInt16,
-  eth_type      UInt16
+  type          UInt16
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (capture_id, packet_id, tag_index)

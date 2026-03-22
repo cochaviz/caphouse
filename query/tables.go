@@ -12,6 +12,7 @@ type Tables struct {
 // ComponentInfo holds the fully-qualified table reference and short alias for
 // a single protocol component table.
 type ComponentInfo struct {
-	TableRef string // fully-qualified, e.g. "`mydb`.`pcap_ipv4`"
-	Alias    string // short alias, e.g. "ipv4"
+	TableRef string   // fully-qualified, e.g. "`mydb`.`pcap_ipv4`"
+	Alias    string   // short alias, e.g. "ipv4"
+	Columns  []string // prefixed SELECT expressions, e.g. ["ipv4.src AS ipv4_src", ...]
 }

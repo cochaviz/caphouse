@@ -83,8 +83,8 @@ func (c *ARPComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *ARPComponent) ScanColumns() []string {
-	return []string{"packet_id", "arp_op", "sender_mac", "sender_ip", "target_mac", "target_ip"}
+func (c *ARPComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *ARPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {

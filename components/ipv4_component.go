@@ -28,17 +28,17 @@ type IPv4Component struct {
 
 	Protocol uint8 `ch:"protocol"`
 
-	SrcIP4 netip.Addr `ch:"src_ip_v4"`
-	DstIP4 netip.Addr `ch:"dst_ip_v4"`
+	SrcIP4 netip.Addr `ch:"src"`
+	DstIP4 netip.Addr `ch:"dst"`
 
-	IPv4IHL         uint8  `ch:"ipv4_ihl"`
-	IPv4TOS         uint8  `ch:"ipv4_tos"`
-	IPv4TotalLen    uint16 `ch:"ipv4_total_len"`
-	IPv4ID          uint16 `ch:"ipv4_id"`
-	IPv4Flags       uint8  `ch:"ipv4_flags"`
-	IPv4FragOffset  uint16 `ch:"ipv4_frag_offset"`
-	IPv4TTL         uint8  `ch:"ipv4_ttl"`
-	IPv4HdrChecksum uint16 `ch:"ipv4_hdr_checksum"`
+	IPv4IHL         uint8  `ch:"ihl"`
+	IPv4TOS         uint8  `ch:"tos"`
+	IPv4TotalLen    uint16 `ch:"total_len"`
+	IPv4ID          uint16 `ch:"id"`
+	IPv4Flags       uint8  `ch:"flags"`
+	IPv4FragOffset  uint16 `ch:"frag_offset"`
+	IPv4TTL         uint8  `ch:"ttl"`
+	IPv4HdrChecksum uint16 `ch:"hdr_checksum"`
 
 	OptionsRaw []byte `ch:"options_raw"`
 }
@@ -111,14 +111,8 @@ func (c *IPv4Component) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *IPv4Component) ScanColumns() []string {
-	return []string{
-		"packet_id", "parsed_ok", "parse_err", "protocol",
-		"src_ip_v4", "dst_ip_v4",
-		"ipv4_ihl", "ipv4_tos", "ipv4_total_len", "ipv4_id",
-		"ipv4_flags", "ipv4_frag_offset", "ipv4_ttl", "ipv4_hdr_checksum",
-		"options_raw",
-	}
+func (c *IPv4Component) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *IPv4Component) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
@@ -185,7 +179,7 @@ func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *IPv4Component) Schema(table string) string { return applySchema(ipv4SchemaSQL, table) }
 func (c *IPv4Component) Indexes(table string) []string {
 	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_v4 (dst_ip_v4) TYPE bloom_filter GRANULARITY 4", table),
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),
 	}
 }

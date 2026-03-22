@@ -6,10 +6,10 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   codec_version UInt16,
 
-  src_mac  FixedString(6),
-  dst_mac  FixedString(6),
-  eth_type UInt16,
-  eth_len  UInt16
+  src  FixedString(6),
+  dst  FixedString(6),
+  type UInt16,
+  len  UInt16
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (dst_mac, src_mac, capture_id, packet_id)
+ORDER BY (dst, src, capture_id, packet_id)

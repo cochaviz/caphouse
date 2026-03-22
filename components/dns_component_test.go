@@ -1,6 +1,7 @@
 package components
 
 import (
+	"net"
 	"testing"
 
 	"github.com/google/gopacket"
@@ -70,9 +71,6 @@ func TestDNSEncodeBasic(t *testing.T) {
 	if got.QuestionsType[1] != uint16(layers.DNSTypeAAAA) {
 		t.Errorf("QuestionsType[1]: got %d", got.QuestionsType[1])
 	}
-	if len(got.DNSRaw) == 0 {
-		t.Error("DNSRaw is empty")
-	}
 }
 
 func TestDNSEncodeFlags(t *testing.T) {
@@ -136,6 +134,79 @@ func TestDNSRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	// DNS reconstruct replays DNSRaw verbatim, so the output equals the original wire bytes.
+	// DNS reconstructs from stored fields without name compression; for a simple query built
+	// the same way, the output is byte-identical to the original.
 	assertReconstructBytes(t, comps[0].(LayerDecoder), parsed.LayerContents())
+}
+
+func TestDNSEncodeAnswers(t *testing.T) {
+	ip := net.ParseIP("1.2.3.4").To4()
+	dns := &layers.DNS{
+		ID: 0xbeef,
+		QR: true,
+		AA: true,
+		Questions: []layers.DNSQuestion{
+			{Name: []byte("example.com"), Type: layers.DNSTypeA, Class: layers.DNSClassIN},
+		},
+		Answers: []layers.DNSResourceRecord{
+			{Name: []byte("example.com"), Type: layers.DNSTypeA, Class: layers.DNSClassIN, TTL: 300, IP: ip},
+		},
+		Authorities: []layers.DNSResourceRecord{
+			{Name: []byte("example.com"), Type: layers.DNSTypeNS, Class: layers.DNSClassIN, TTL: 3600, NS: []byte("ns1.example.com")},
+		},
+	}
+	data := buildDNSBytes(t, dns)
+	parsed := parseDNSLayer(t, data)
+
+	enc := &DNSComponent{}
+	comps, err := enc.Encode(parsed)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got := comps[0].(*DNSComponent)
+
+	if len(got.AnswersName) != 1 {
+		t.Fatalf("AnswersName length: got %d want 1", len(got.AnswersName))
+	}
+	if got.AnswersName[0] != "example.com" {
+		t.Errorf("AnswersName[0]: got %q want %q", got.AnswersName[0], "example.com")
+	}
+	if got.AnswersType[0] != uint16(layers.DNSTypeA) {
+		t.Errorf("AnswersType[0]: got %d", got.AnswersType[0])
+	}
+	if got.AnswersTTL[0] != 300 {
+		t.Errorf("AnswersTTL[0]: got %d want 300", got.AnswersTTL[0])
+	}
+	if got.AnswersIP[0] != "1.2.3.4" {
+		t.Errorf("AnswersIP[0]: got %q want %q", got.AnswersIP[0], "1.2.3.4")
+	}
+	if len(got.AuthorityName) != 1 {
+		t.Fatalf("AuthorityName length: got %d want 1", len(got.AuthorityName))
+	}
+	if got.AuthorityType[0] != uint16(layers.DNSTypeNS) {
+		t.Errorf("AuthorityType[0]: got %d", got.AuthorityType[0])
+	}
+
+	// Reconstruct and re-parse to verify semantic equivalence.
+	ctx := &DecodeContext{}
+	if err := comps[0].(LayerDecoder).Reconstruct(ctx); err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	buf := gopacket.NewSerializeBuffer()
+	if err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{}, ctx.Layers...); err != nil {
+		t.Fatalf("serialize: %v", err)
+	}
+	reparsed := parseDNSLayer(t, buf.Bytes())
+	if reparsed.ID != 0xbeef {
+		t.Errorf("reparsed ID: got 0x%x want 0xbeef", reparsed.ID)
+	}
+	if len(reparsed.Answers) != 1 {
+		t.Fatalf("reparsed Answers length: got %d want 1", len(reparsed.Answers))
+	}
+	if !reparsed.Answers[0].IP.Equal(ip) {
+		t.Errorf("reparsed answer IP: got %v want %v", reparsed.Answers[0].IP, ip)
+	}
+	if len(reparsed.Authorities) != 1 {
+		t.Fatalf("reparsed Authorities length: got %d want 1", len(reparsed.Authorities))
+	}
 }

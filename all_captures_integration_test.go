@@ -4,11 +4,8 @@ package caphouse
 
 import (
 	"bytes"
-	"context"
 	"testing"
 	"time"
-
-	"caphouse/query"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -287,13 +284,3 @@ func TestExportAllStabilityWithinCapture(t *testing.T) {
 	}
 }
 
-// TestExportAllRequiresTimeRange is an integration-level check that the
-// ExportAllCapturesFiltered function rejects a query without a time node.
-func TestExportAllRequiresTimeRangeIntegration(t *testing.T) {
-	c := &Client{}
-	q, _ := query.ParseQuery("host 1.2.3.4")
-	_, _, err := c.ExportAllCapturesFiltered(context.Background(), q, nil)
-	if err == nil {
-		t.Fatal("expected error for query without time range, got nil")
-	}
-}
