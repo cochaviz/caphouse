@@ -19,10 +19,10 @@ type EthernetComponent struct {
 	CaptureID    uuid.UUID `ch:"capture_id"`
 	PacketID     uint64    `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
-	SrcMAC       []byte    `ch:"src_mac"`
-	DstMAC       []byte    `ch:"dst_mac"`
-	EtherType    uint16    `ch:"eth_type"`
-	Length       uint16    `ch:"eth_len"`
+	SrcMAC    []byte `ch:"src"`
+	DstMAC    []byte `ch:"dst"`
+	EtherType uint16 `ch:"type"`
+	Length    uint16 `ch:"len"`
 }
 
 func (c *EthernetComponent) Kind() uint        { return ComponentEthernet }
@@ -64,8 +64,8 @@ func (c *EthernetComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *EthernetComponent) ScanColumns() []string {
-	return []string{"packet_id", "src_mac", "dst_mac", "eth_type", "eth_len"}
+func (c *EthernetComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *EthernetComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {

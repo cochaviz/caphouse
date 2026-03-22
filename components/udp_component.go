@@ -21,8 +21,8 @@ type UDPComponent struct {
 	PacketID     uint64    `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
-	SrcPort  uint16 `ch:"src_port"`
-	DstPort  uint16 `ch:"dst_port"`
+	SrcPort  uint16 `ch:"src"`
+	DstPort  uint16 `ch:"dst"`
 	Length   uint16 `ch:"length"`
 	Checksum uint16 `ch:"checksum"`
 }
@@ -62,8 +62,8 @@ func (c *UDPComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *UDPComponent) ScanColumns() []string {
-	return []string{"packet_id", "src_port", "dst_port", "length", "checksum"}
+func (c *UDPComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *UDPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
@@ -92,6 +92,6 @@ func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *UDPComponent) Schema(table string) string { return applySchema(udpSchemaSQL, table) }
 func (c *UDPComponent) Indexes(table string) []string {
 	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_port (dst_port) TYPE bloom_filter GRANULARITY 4", table),
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 	}
 }

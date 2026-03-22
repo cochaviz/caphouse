@@ -6,7 +6,6 @@ import (
 	"caphouse/query"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -272,9 +271,13 @@ func (c *Client) fetchComponentBatch(
 
 		proto := ctor()
 		whereClause, args := rangeArgs(captureID, chunk)
+		scanCols, err := proto.DataColumns("")
+		if err != nil {
+			return nil, fmt.Errorf("data columns for %s: %w", proto.Table(), err)
+		}
 		query := fmt.Sprintf(
 			"SELECT %s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY %s ASC",
-			strings.Join(proto.ScanColumns(), ", "),
+			strings.Join(scanCols, ", "),
 			c.tableRef(proto.Table()), whereClause, proto.FetchOrderBy(),
 		)
 		rows, err := c.conn.Query(ctx, query, args...)
@@ -527,23 +530,43 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 	return result, nil
 }
 
-// ExportAllCapturesFiltered finds all captures with a start time at or before
-// the upper bound of f's time filter, then exports all matching packets as a
-// single merged PCAP file sorted by absolute packet time. Ties are broken by
-// capture start time, then by capture ID.
+// ExportAllCapturesFiltered finds all captures with packets in the given time
+// window and exports them as a single merged PCAP file sorted by absolute
+// packet time. Ties are broken by capture start time, then by capture ID.
+// f is an optional query filter; an empty f.Clause selects all packets.
 //
-// f must contain a time filter; if it does not, an error is returned.
 // packetsWritten is incremented after each packet (may be nil).
-func (c *Client) ExportAllCapturesFiltered(ctx context.Context, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
-	from, to, ok := f.TimeRange()
-	if !ok {
-		return nil, 0, errors.New("--capture all requires a time range filter (e.g. 'time 2024-01-01T00:00:00Z to 2024-01-02T00:00:00Z')")
-	}
-
+func (c *Client) ExportAllCapturesFiltered(ctx context.Context, from, to time.Time, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
 	// Query across all captures — no capture ID pre-filter.
-	refs, err := c.fetchSortedPacketRefs(ctx, nil, from, to)
+	refs, err := c.fetchSortedPacketRefs(ctx, nil, from.UnixNano(), to.UnixNano())
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// If a WHERE clause filter is set, intersect with its matching packet IDs.
+	// QueryPackets applies the full query (INNER JOINs on component tables etc.)
+	// and returns only matching (captureID, packetID) pairs. We then keep only
+	// the time-sorted refs that appear in that set.
+	if f.Clause != "" {
+		filterRefs, err := c.QueryPackets(ctx, nil, f)
+		if err != nil {
+			return nil, 0, fmt.Errorf("export filter: %w", err)
+		}
+		type key struct {
+			captureID uuid.UUID
+			packetID  uint64
+		}
+		allowed := make(map[key]struct{}, len(filterRefs))
+		for _, r := range filterRefs {
+			allowed[key{r.CaptureID, r.PacketID}] = struct{}{}
+		}
+		filtered := refs[:0]
+		for _, r := range refs {
+			if _, ok := allowed[key{r.captureID, r.packetID}]; ok {
+				filtered = append(filtered, r)
+			}
+		}
+		refs = filtered
 	}
 
 	// Build capture metadata map only for captures that have matching packets.

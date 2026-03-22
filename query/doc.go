@@ -1,38 +1,40 @@
-// Package query implements a tcpdump-style filter expression parser and
-// ClickHouse SQL compiler for caphouse packet queries.
+// Package query provides a raw-SQL WHERE clause query type for filtering
+// network packet captures stored in ClickHouse.
 //
-// # Parsing
+// Users write standard ClickHouse SQL predicates referencing component tables
+// by name (e.g. ipv4.dst = '1.1.1.1', tcp.src = 80). The package detects
+// which component tables are needed and INNER JOINs them automatically.
 //
-// Use [ParseQuery] to compile a filter string into a [Query]:
+// # Query syntax
 //
-//	q, err := query.ParseQuery("host 10.0.0.1 and port 443")
+// A query is a raw ClickHouse WHERE clause body. Component tables are
+// referenced as "component.field", e.g.:
 //
-// Supported primitives:
+//	ipv4.dst = '1.1.1.1' and udp.dst = 53
+//	tcp.flags & 2 != 0
+//	dns
 //
-//	host <ip>                      src or dst IP matches (IPv4 or IPv6)
-//	src host <ip>                  source IP matches
-//	dst host <ip>                  destination IP matches
-//	port <n>                       src or dst TCP/UDP port matches
-//	src port <n>                   source port matches
-//	dst port <n>                   destination port matches
-//	time <rfc3339> to <rfc3339>    packet timestamp within range
+// A bare component name (no dot) is a presence check: packets are filtered
+// to those that have that component (via INNER JOIN with no extra condition).
 //
-// Primitives can be combined with 'and', 'or', 'not', and parentheses.
+// # Aliases
 //
-// # SQL generation
+// Short component name: eth → ethernet
 //
-// A [Query] compiles to ClickHouse SQL via INTERSECT / UNION DISTINCT / EXCEPT
-// set operations. Call [Query.Subquery] to get an embeddable SQL fragment that
-// returns (capture_id, packet_id) rows, or [Query.SQL] / [Query.SearchSQL] for
-// full SELECT statements.
+// Field aliases that expand to src/dst pairs (= operator only):
 //
-// Both methods require a [Tables] value that holds pre-qualified table
-// references; obtain one from the caphouse client via its Tables() method.
+//	ipv4.addr    → (ipv4.src = val or ipv4.dst = val)
+//	ipv6.addr    → (ipv6.src = val or ipv6.dst = val)
+//	tcp.port     → (tcp.src = val or tcp.dst = val)
+//	udp.port     → (udp.src = val or udp.dst = val)
+//	ethernet.mac → (ethernet.src = val or ethernet.dst = val)
+//	arp.ip       → (arp.sender_ip = val or arp.target_ip = val)
+//	arp.mac      → (arp.sender_mac = val or arp.target_mac = val)
 //
-// # Time range extraction
+// # Time range
 //
-// [Query.TimeRange] returns the time bounds implied by any 'time' nodes in the
-// filter. For AND queries the intersection of both sides is used; for OR
-// queries the union. This is used by the export pipeline to prune captures
-// before executing the full SQL filter.
+// Time-bounded searches pass fromNs/toNs (Unix nanoseconds) directly to
+// [Query.SearchSQL] and [Query.CountsSQL]. The condition is applied to the
+// absolute packet timestamp (capture start + relative offset) in the outer
+// query, using the captures table that is already joined there.
 package query

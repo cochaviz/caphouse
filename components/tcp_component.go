@@ -38,8 +38,8 @@ type TCPComponent struct {
 	PacketID     uint64    `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
-	SrcPort    uint16 `ch:"src_port"`
-	DstPort    uint16 `ch:"dst_port"`
+	SrcPort    uint16 `ch:"src"`
+	DstPort    uint16 `ch:"dst"`
 	Seq        uint32 `ch:"seq"`
 	Ack        uint32 `ch:"ack"`
 	DataOffset uint8  `ch:"data_offset"`
@@ -97,14 +97,8 @@ func (c *TCPComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *TCPComponent) ScanColumns() []string {
-	return []string{
-		"packet_id",
-		"src_port", "dst_port",
-		"seq", "ack",
-		"data_offset", "flags", "window", "checksum", "urgent",
-		"options_raw",
-	}
+func (c *TCPComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *TCPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
@@ -187,7 +181,7 @@ func (c *TCPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *TCPComponent) Schema(table string) string { return applySchema(tcpSchemaSQL, table) }
 func (c *TCPComponent) Indexes(table string) []string {
 	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst_port (dst_port) TYPE bloom_filter GRANULARITY 4", table),
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_flags (flags) TYPE set(512) GRANULARITY 4", table),
 	}
 }

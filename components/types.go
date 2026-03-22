@@ -113,7 +113,17 @@ type ClickhouseMapper interface {
 	Table() string
 	ClickhouseColumns() ([]string, error)
 	ClickhouseValues() ([]any, error)
-	ScanColumns() []string
+	// DataColumns returns SELECT column expressions derived from the struct's
+	// ch: tags, always excluding capture_id and codec_version.
+	//
+	// When tableAlias is empty, plain column names are returned (packet_id
+	// included) — suitable for ScanRow SELECT queries.
+	//
+	// When tableAlias is non-empty, packet_id is also excluded and each
+	// column is expressed as "alias.col AS alias_col" (or "alias.col AS col"
+	// when the column name already begins with alias+"_"). The result is
+	// suitable for use in a multi-component SELECT with LEFT JOINs.
+	DataColumns(tableAlias string) ([]string, error)
 }
 
 // LayerEncoder defines the encoding contract for a gopacket layer.
@@ -203,6 +213,49 @@ var ComponentFactories = map[uint]func() Component{
 	ComponentDNS:      func() Component { return &DNSComponent{} },
 	ComponentNTP:      func() Component { return &NTPComponent{} },
 	ComponentARP:      func() Component { return &ARPComponent{} },
+}
+
+// GetDataColumnsFrom derives SELECT column expressions from a struct's ch: tags.
+// capture_id and codec_version are always excluded.
+//
+// When tableAlias is empty, plain column names are returned (packet_id included),
+// suitable for ScanRow queries.
+//
+// When tableAlias is non-empty, packet_id is also excluded and each column is
+// expressed as "alias.col AS alias_col". If the column name already begins with
+// alias+"_" the output alias is kept as the column name itself (avoiding double
+// prefixes like arp_arp_op).
+func GetDataColumnsFrom(v any, tableAlias string) ([]string, error) {
+	all, err := GetClickhouseColumnsFrom(v)
+	if err != nil {
+		return nil, err
+	}
+	withAlias := tableAlias != ""
+	alwaysExclude := map[string]bool{"capture_id": true, "codec_version": true}
+
+	cols := make([]string, 0, len(all))
+	for _, col := range all {
+		if alwaysExclude[col] {
+			continue
+		}
+		if withAlias && col == "packet_id" {
+			continue
+		}
+		if withAlias {
+			prefix := tableAlias + "_"
+			qualified := tableAlias + "." + col
+			if strings.HasPrefix(col, prefix) {
+				// e.g. arp_op with alias arp → arp.arp_op AS arp_op
+				cols = append(cols, fmt.Sprintf("%s AS %s", qualified, col))
+			} else {
+				// e.g. src with alias ipv4 → ipv4.src AS ipv4_src
+				cols = append(cols, fmt.Sprintf("%s AS %s_%s", qualified, tableAlias, col))
+			}
+		} else {
+			cols = append(cols, col)
+		}
+	}
+	return cols, nil
 }
 
 func GetClickhouseValuesFrom(v any) ([]any, error) {

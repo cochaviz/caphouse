@@ -11,13 +11,13 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   protocol UInt8,
 
-  src_ip_v6 IPv6,
-  dst_ip_v6 IPv6,
+  src IPv6,
+  dst IPv6,
 
-  ipv6_payload_len   UInt16 CODEC(Delta, LZ4),
-  ipv6_hop_limit     UInt8,
-  ipv6_flow_label    UInt32,
-  ipv6_traffic_class UInt8
+  payload_len   UInt16 CODEC(Delta, LZ4),
+  hop_limit     UInt8,
+  flow_label    UInt32,
+  traffic_class UInt8
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (dst_ip_v6, src_ip_v6, capture_id, packet_id)
+ORDER BY (dst, src, capture_id, packet_id)

@@ -59,8 +59,8 @@ func (c *LinuxSLLComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *LinuxSLLComponent) ScanColumns() []string {
-	return []string{"packet_id", "l2_len", "l2_hdr_raw"}
+func (c *LinuxSLLComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *LinuxSLLComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -25,9 +26,11 @@ func (c *Client) tables() query.Tables {
 		proto := ctor()
 		table := proto.Table()
 		alias := strings.TrimPrefix(table, "pcap_")
+		cols, _ := proto.DataColumns(alias)
 		comps[alias] = query.ComponentInfo{
 			TableRef: c.tableRef(table),
 			Alias:    alias,
+			Columns:  cols,
 		}
 	}
 	return query.Tables{
@@ -140,8 +143,9 @@ func (c *Client) queryJSON(ctx context.Context, sql string) ([]map[string]any, e
 // Each map key is a column name; values are native Go types (string, uint64,
 // int64, etc.) that marshal cleanly to JSON.
 // When captureIDs is nil or empty, all captures are searched.
-func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.Query, comps []string, limit, offset int) ([]map[string]any, error) {
-	sql, err := q.SearchSQL(c.tables(), captureIDs, comps, limit, offset)
+// fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
+func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.Query, comps []string, limit, offset int, fromNs, toNs int64) ([]map[string]any, error) {
+	sql, err := q.SearchSQL(c.tables(), captureIDs, comps, limit, offset, fromNs, toNs)
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +177,8 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 		"lower(hex(p.frame_raw)) AS frame_raw",
 	}
 	for _, alias := range allComps {
-		selectParts = append(selectParts,
-			fmt.Sprintf("%s.* EXCEPT (capture_id, packet_id, codec_version)", alias),
-		)
+		info := t.Components[alias]
+		selectParts = append(selectParts, info.Columns...)
 	}
 
 	var joins []string
@@ -209,6 +212,54 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	return rows[0], nil
 }
 
+// QueryPacketFrame reconstructs the original frame bytes for a single packet.
+// Returns nil when the packet is not found.
+func (c *Client) QueryPacketFrame(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]byte, error) {
+	q := fmt.Sprintf(
+		"SELECT incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? AND packet_id = ? LIMIT 1",
+		c.packetsTable(),
+	)
+	row := c.conn.QueryRow(ctx, q, captureID, packetID)
+
+	var (
+		inclLen    uint32
+		truncExtra uint32
+		frameRaw   string
+		frameHash  string
+	)
+	componentMask := new(big.Int)
+	if err := row.Scan(&inclLen, &truncExtra, componentMask, &frameRaw, &frameHash); err != nil {
+		if err == io.EOF {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan packet frame: %w", err)
+	}
+
+	nucleus := components.PacketNucleus{
+		CaptureID:  captureID,
+		PacketID:   packetID,
+		InclLen:    inclLen,
+		OrigLen:    inclLen + truncExtra,
+		Components: componentMask,
+		FrameRaw:   []byte(frameRaw),
+		FrameHash:  []byte(frameHash),
+	}
+
+	all, err := c.fetchComponentsForBatch(ctx, captureID, []uint64{packetID})
+	if err != nil {
+		return nil, fmt.Errorf("fetch components: %w", err)
+	}
+	componentList, err := resolveComponents(nucleus, all)
+	if err != nil {
+		return nil, fmt.Errorf("resolve components: %w", err)
+	}
+	frame, err := reconstructFrame(nucleus, componentList)
+	if err != nil {
+		return nil, fmt.Errorf("reconstruct frame: %w", err)
+	}
+	return frame, nil
+}
+
 // CountBin holds the packet count for a single time bin.
 type CountBin struct {
 	// BinStartNs is the Unix nanosecond timestamp of the bin's start.
@@ -220,8 +271,9 @@ type CountBin struct {
 // QueryCounts executes a packet-count histogram. Packets matched by f are
 // bucketed into fixed-width time bins of binSizeSeconds seconds.
 // When captureIDs is nil or empty, all captures are searched.
-func (c *Client) QueryCounts(ctx context.Context, captureIDs []uuid.UUID, f query.Query, binSizeSeconds int64) ([]CountBin, error) {
-	sql, err := f.CountsSQL(c.tables(), captureIDs, binSizeSeconds*int64(1e9))
+// fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
+func (c *Client) QueryCounts(ctx context.Context, captureIDs []uuid.UUID, f query.Query, binSizeSeconds int64, fromNs, toNs int64, tzOffsetSeconds int64) ([]CountBin, error) {
+	sql, err := f.CountsSQL(c.tables(), captureIDs, binSizeSeconds*int64(1e9), fromNs, toNs, tzOffsetSeconds*int64(1e9))
 	if err != nil {
 		return nil, err
 	}

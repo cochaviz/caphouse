@@ -64,8 +64,8 @@ func (c *IPv6ExtComponent) Reconstruct(ctx *DecodeContext) error {
 	return nil
 }
 
-func (c *IPv6ExtComponent) ScanColumns() []string {
-	return []string{"packet_id", "ext_index", "ext_type", "ext_raw"}
+func (c *IPv6ExtComponent) DataColumns(tableAlias string) ([]string, error) {
+	return GetDataColumnsFrom(c, tableAlias)
 }
 
 func (c *IPv6ExtComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
