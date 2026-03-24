@@ -3,8 +3,6 @@ package query
 import (
 	"fmt"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // formatArg formats a single query argument as an inline SQL literal.
@@ -37,32 +35,31 @@ func inlineArgs(sql string, args []any) string {
 	return b.String()
 }
 
-// CaptureInSQL returns a SQL IN predicate with capture UUIDs inlined.
-// UUIDs are safe to inline — they are hex strings validated by the uuid package.
+// SessionInSQL returns a SQL IN predicate with session IDs inlined as integers.
 // Panics if ids is empty.
-func CaptureInSQL(ids []uuid.UUID) string {
-	quoted := make([]string, len(ids))
+func SessionInSQL(ids []uint64) string {
+	parts := make([]string, len(ids))
 	for i, id := range ids {
-		quoted[i] = "'" + id.String() + "'"
+		parts[i] = fmt.Sprintf("%d", id)
 	}
-	return "capture_id IN (" + strings.Join(quoted, ",") + ")"
+	return "session_id IN (" + strings.Join(parts, ",") + ")"
 }
 
-// CaptureScope returns a WHERE clause (including the keyword) that restricts
-// to the given captures, or an empty string when ids is nil/empty (meaning
-// "all captures — no restriction").
-func CaptureScope(ids []uuid.UUID) string {
+// SessionScope returns a WHERE clause (including the keyword) that restricts
+// to the given sessions, or an empty string when ids is nil/empty (meaning
+// "all sessions — no restriction").
+func SessionScope(ids []uint64) string {
 	if len(ids) == 0 {
 		return ""
 	}
-	return "WHERE " + CaptureInSQL(ids)
+	return "WHERE " + SessionInSQL(ids)
 }
 
-// whereWithScope returns a WHERE clause combining an optional capture scope
+// whereWithScope returns a WHERE clause combining an optional session scope
 // with a mandatory condition. When ids is empty only the condition is used.
-func whereWithScope(ids []uuid.UUID, condition string) string {
+func whereWithScope(ids []uint64, condition string) string {
 	if len(ids) == 0 {
 		return "WHERE " + condition
 	}
-	return "WHERE " + CaptureInSQL(ids) + " AND " + condition
+	return "WHERE " + SessionInSQL(ids) + " AND " + condition
 }

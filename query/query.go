@@ -35,8 +35,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // knownComponents is the set of valid component table aliases (pcap_ prefix stripped).
@@ -119,10 +117,74 @@ var fieldAliasExpansions = map[string][2]string{
 	"arp.mac":      {"sender_mac", "target_mac"},
 }
 
-// PacketRef identifies a single packet within a capture.
+// PacketRef identifies a single packet within a session.
 type PacketRef struct {
-	CaptureID uuid.UUID
-	PacketID  uint64
+	SessionID uint64
+	PacketID  uint32
+}
+
+// BreakdownField describes a resolved GROUP BY expression for histogram breakdowns.
+type BreakdownField struct {
+	Component string // component alias to JOIN (e.g. "ipv4")
+	SQLExpr   string // SQL expression for GROUP BY (e.g. "ipv4.src" or "arrayJoin([ipv4.src, ipv4.dst])")
+}
+
+// ParseBreakdownFields parses a comma-separated list of field expressions
+// (e.g. "ipv4.src, tcp.dst") into a slice of BreakdownFields.
+// Returns an error if any individual field is invalid.
+func ParseBreakdownFields(input string) ([]BreakdownField, error) {
+	parts := strings.Split(input, ",")
+	fields := make([]BreakdownField, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		bf, err := ParseBreakdownField(p)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, bf)
+	}
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("no valid breakdown fields provided")
+	}
+	return fields, nil
+}
+
+// ParseBreakdownField parses a single field expression like "ipv4.src" or "ipv4.addr"
+// into a BreakdownField ready for use in CountsSQL. Alias fields (addr, port, mac, ip)
+// expand to arrayJoin expressions that emit one row per address/port per packet.
+// Returns an error for unknown components or missing dots.
+// The special "proto" keyword is not handled here; use ParseBreakdownSpec on the
+// caphouse.Client, which resolves it dynamically from the component registry.
+func ParseBreakdownField(field string) (BreakdownField, error) {
+	field = strings.TrimSpace(field)
+
+	// Apply eth short name
+	if strings.HasPrefix(field, "eth.") {
+		field = "ethernet" + field[3:]
+	}
+	dotIdx := strings.Index(field, ".")
+	if dotIdx < 0 {
+		return BreakdownField{}, fmt.Errorf("breakdown field must be in component.field format (e.g. ipv4.src), got %q", field)
+	}
+	comp := field[:dotIdx]
+	attr := field[dotIdx+1:]
+	if !knownComponents[comp] {
+		return BreakdownField{}, fmt.Errorf("unknown component %q in breakdown field", comp)
+	}
+	// Check alias expansion
+	if fields, ok := fieldAliasExpansions[comp+"."+attr]; ok {
+		return BreakdownField{
+			Component: comp,
+			SQLExpr:   fmt.Sprintf("arrayJoin([%s.%s, %s.%s])", comp, fields[0], comp, fields[1]),
+		}, nil
+	}
+	return BreakdownField{
+		Component: comp,
+		SQLExpr:   comp + "." + attr,
+	}, nil
 }
 
 // Query wraps a raw ClickHouse WHERE clause. Component tables referenced as
@@ -182,15 +244,15 @@ func ParseQuery(clause string) (Query, error) {
 	}, nil
 }
 
-// Subquery returns a SQL fragment selecting (capture_id, packet_id) rows that
+// Subquery returns a SQL fragment selecting (session_id, packet_id) rows that
 // match this query. It can be embedded in a larger query via IN (...).
-func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error) {
+func (q Query) Subquery(t Tables, sessionIDs []uint64) (string, []any, error) {
 	if err := q.validateComponents(t); err != nil {
 		return "", nil, err
 	}
 
 	var sb strings.Builder
-	sb.WriteString("SELECT p.capture_id, p.packet_id\nFROM ")
+	sb.WriteString("SELECT p.session_id, p.packet_id\nFROM ")
 	sb.WriteString(t.Packets)
 	sb.WriteString(" AS p")
 
@@ -200,12 +262,12 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 		sb.WriteString(info.TableRef)
 		sb.WriteString(" AS ")
 		sb.WriteString(info.Alias)
-		sb.WriteString(" USING (capture_id, packet_id)")
+		sb.WriteString(" USING (session_id, packet_id)")
 	}
 
 	var conditions []string
-	if len(captureIDs) > 0 {
-		conditions = append(conditions, "p."+CaptureInSQL(captureIDs))
+	if len(sessionIDs) > 0 {
+		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
 	}
 	if q.Clause != "" {
 		conditions = append(conditions, q.Clause)
@@ -214,7 +276,7 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 		sb.WriteString("\nWHERE ")
 		sb.WriteString(strings.Join(conditions, " AND "))
 	}
-	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
+	sb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
 
 	return sb.String(), nil, nil
 }
@@ -222,7 +284,7 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 // SQL generates a full SELECT statement equivalent to this filter, with bind
 // parameters inlined. It selects p.* from pcap_packets plus any requested
 // component columns via LEFT JOIN.
-func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, error) {
+func (q Query) SQL(t Tables, sessionIDs []uint64, comps []string) (string, error) {
 	if err := q.validateComponents(t); err != nil {
 		return "", err
 	}
@@ -232,7 +294,7 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 		}
 	}
 
-	sub, _, err := q.Subquery(t, captureIDs)
+	sub, _, err := q.Subquery(t, sessionIDs)
 	if err != nil {
 		return "", err
 	}
@@ -241,7 +303,7 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 	for _, comp := range comps {
 		info := t.Components[comp]
 		selectParts = append(selectParts,
-			fmt.Sprintf("%s.* EXCEPT (capture_id, packet_id, codec_version)", info.Alias),
+			fmt.Sprintf("%s.* EXCEPT (session_id, packet_id, codec_version)", info.Alias),
 		)
 	}
 
@@ -250,7 +312,7 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 	for _, comp := range comps {
 		info := t.Components[comp]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s USING (capture_id, packet_id)", info.TableRef, info.Alias),
+			fmt.Sprintf("LEFT JOIN %s AS %s USING (session_id, packet_id)", info.TableRef, info.Alias),
 		)
 	}
 
@@ -263,21 +325,24 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 		sb.WriteString("\n")
 		sb.WriteString(j)
 	}
-	sb.WriteString("\nWHERE (p.capture_id, p.packet_id) IN (\n")
+	sb.WriteString("\nWHERE (p.session_id, p.packet_id) IN (\n")
 	sb.WriteString(sub)
 	sb.WriteString("\n)")
-	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
+	sb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
 	return sb.String(), nil
 }
-
-// absTimeExpr is the ClickHouse expression for the absolute packet timestamp
-// in nanoseconds, referencing the "cap" captures alias already in scope.
-const absTimeExpr = "toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts)"
 
 // SearchSQL generates the SQL used by the JSON search API.
 // fromNs and toNs are optional Unix-nanosecond bounds on the absolute packet
 // timestamp (0 = unset). When set, only packets within [fromNs, toNs] are returned.
-func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit, offset int, fromNs, toNs int64, asc bool) (string, error) {
+//
+// The query is executed in two phases:
+//  1. An inner subquery resolves the paginated (session_id, packet_id) set using
+//     only the filter-condition INNER JOINs, with ORDER BY + LIMIT/OFFSET applied
+//     before any display columns are fetched. This keeps the paginated set small.
+//  2. The outer query LEFT JOINs the requested display components only for those
+//     N rows, avoiding expensive joins across the full matching set.
+func (q Query) SearchSQL(t Tables, sessionIDs []uint64, comps []string, limit, offset int, fromNs, toNs int64, asc bool) (string, error) {
 	if err := q.validateComponents(t); err != nil {
 		return "", err
 	}
@@ -287,21 +352,54 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 		}
 	}
 
-	sub, _, err := q.Subquery(t, captureIDs)
-	if err != nil {
-		return "", err
+	// ── Phase 1: paginated ID subquery ─────────────────────────────────────
+	// Uses INNER JOINs for filter conditions only. ORDER BY + time filter +
+	// LIMIT/OFFSET are applied here so the subquery produces at most N rows.
+	var idSb strings.Builder
+	idSb.WriteString("SELECT p.session_id, p.packet_id\nFROM ")
+	idSb.WriteString(t.Packets)
+	idSb.WriteString(" AS p")
+	for _, comp := range q.components {
+		info := t.Components[comp]
+		idSb.WriteString("\nINNER JOIN ")
+		idSb.WriteString(info.TableRef)
+		idSb.WriteString(" AS ")
+		idSb.WriteString(info.Alias)
+		idSb.WriteString(" USING (session_id, packet_id)")
+	}
+	var conditions []string
+	if len(sessionIDs) > 0 {
+		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
+	}
+	if q.Clause != "" {
+		conditions = append(conditions, q.Clause)
+	}
+	if fromNs != 0 || toNs != 0 {
+		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
+	}
+	if len(conditions) > 0 {
+		idSb.WriteString("\nWHERE ")
+		idSb.WriteString(strings.Join(conditions, " AND "))
+	}
+	if asc {
+		idSb.WriteString("\nORDER BY p.ts ASC")
+	} else {
+		idSb.WriteString("\nORDER BY p.ts DESC")
+	}
+	idSb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
+	if limit > 0 {
+		idSb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
+	}
+	if offset > 0 {
+		idSb.WriteString(fmt.Sprintf(" OFFSET %d", offset))
 	}
 
-	capScope := CaptureScope(captureIDs)
-	var capScopeClause string
-	if capScope != "" {
-		capScopeClause = " " + capScope
-	}
-
+	// ── Phase 2: assemble display columns for those N rows ─────────────────
+	// LEFT JOINs the requested display components only for the paginated set.
 	selectParts := []string{
-		"p.capture_id AS capture_id",
+		"p.session_id AS session_id",
 		"p.packet_id AS packet_id",
-		"toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) AS timestamp_ns",
+		"p.ts AS timestamp_ns",
 		"p.incl_len AS incl_len",
 		"p.incl_len + p.trunc_extra AS orig_len",
 		"toUInt64(p.components) AS components",
@@ -310,16 +408,11 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 		info := t.Components[comp]
 		selectParts = append(selectParts, info.Columns...)
 	}
-
-	fromClause := fmt.Sprintf(
-		"FROM %s AS p\nINNER JOIN (SELECT capture_id, created_at FROM %s%s LIMIT 1 BY capture_id) cap ON p.capture_id = cap.capture_id",
-		t.Packets, t.Captures, capScopeClause,
-	)
 	var joins []string
 	for _, comp := range comps {
 		info := t.Components[comp]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
+			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
 				info.TableRef, info.Alias, info.Alias, info.Alias),
 		)
 	}
@@ -327,29 +420,18 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 	var sb strings.Builder
 	sb.WriteString("SELECT\n    ")
 	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	sb.WriteString("\n")
-	sb.WriteString(fromClause)
+	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
 	for _, j := range joins {
 		sb.WriteString("\n")
 		sb.WriteString(j)
 	}
-	sb.WriteString("\nWHERE (p.capture_id, p.packet_id) IN (\n")
-	sb.WriteString(sub)
+	sb.WriteString("\nWHERE (p.session_id, p.packet_id) IN (\n")
+	sb.WriteString(idSb.String())
 	sb.WriteString("\n)")
-	if fromNs != 0 || toNs != 0 {
-		sb.WriteString(fmt.Sprintf("\nAND %s BETWEEN %d AND %d", absTimeExpr, fromNs, toNs))
-	}
 	if asc {
 		sb.WriteString("\nORDER BY timestamp_ns ASC")
 	} else {
 		sb.WriteString("\nORDER BY timestamp_ns DESC")
-	}
-	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
-	if limit > 0 {
-		sb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
-	}
-	if offset > 0 {
-		sb.WriteString(fmt.Sprintf(" OFFSET %d", offset))
 	}
 	return sb.String(), nil
 }
@@ -358,45 +440,89 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 // fromNs and toNs are optional Unix-nanosecond bounds (0 = unset).
 // tzOffsetNs is the client's UTC offset in nanoseconds (e.g. 7200e9 for UTC+2),
 // used to align bins to local midnight rather than UTC midnight.
-func (q Query) CountsSQL(t Tables, captureIDs []uuid.UUID, binSizeNs int64, fromNs, toNs int64, tzOffsetNs int64) (string, error) {
+//
+// The query is a flat GROUP BY directly over pcap_packets, with no subquery.
+// When the filter clause is empty, no JOINs are added and ClickHouse only reads
+// the ts column — the leading ORDER BY key — enabling a fast sparse-index range
+// scan. LIMIT 1 BY is omitted: for a histogram, approximate counts during the
+// brief pre-merge window of ReplacingMergeTree are acceptable.
+func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs, toNs int64, tzOffsetNs int64, breakdown []BreakdownField) (string, error) {
 	if err := q.validateComponents(t); err != nil {
 		return "", err
 	}
 
-	sub, _, err := q.Subquery(t, captureIDs)
-	if err != nil {
-		return "", err
+	binExpr := fmt.Sprintf("intDiv(p.ts + %d, %d) * %d - %d", tzOffsetNs, binSizeNs, binSizeNs, tzOffsetNs)
+
+	var sb strings.Builder
+	if len(breakdown) > 0 {
+		// Build the breakdown value expression: single field or concat of multiple.
+		var bdExpr string
+		if len(breakdown) == 1 {
+			bdExpr = fmt.Sprintf("toString(%s)", breakdown[0].SQLExpr)
+		} else {
+			parts := make([]string, len(breakdown))
+			for i, bf := range breakdown {
+				parts[i] = fmt.Sprintf("toString(%s)", bf.SQLExpr)
+			}
+			bdExpr = "concat(" + strings.Join(parts, ", ' / ', ") + ")"
+		}
+		sb.WriteString(fmt.Sprintf(
+			"SELECT %s AS bin_start_ns, %s AS breakdown_value, count() AS count",
+			binExpr, bdExpr,
+		))
+	} else {
+		sb.WriteString(fmt.Sprintf(
+			"SELECT %s AS bin_start_ns, count() AS count",
+			binExpr,
+		))
+	}
+	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
+
+	// Build sorted, deduplicated component list for JOINs
+	compSet := make(map[string]bool)
+	for _, c := range q.components {
+		compSet[c] = true
+	}
+	for _, bf := range breakdown {
+		if bf.Component != "" {
+			compSet[bf.Component] = true
+		}
+	}
+	joinComps := make([]string, 0, len(compSet))
+	for c := range compSet {
+		joinComps = append(joinComps, c)
+	}
+	sort.Strings(joinComps)
+
+	for _, comp := range joinComps {
+		info := t.Components[comp]
+		sb.WriteString("\nINNER JOIN ")
+		sb.WriteString(info.TableRef)
+		sb.WriteString(" AS ")
+		sb.WriteString(info.Alias)
+		sb.WriteString(" USING (session_id, packet_id)")
 	}
 
-	capScope := CaptureScope(captureIDs)
-	var capScopeClause string
-	if capScope != "" {
-		capScopeClause = " " + capScope
+	var conditions []string
+	if len(sessionIDs) > 0 {
+		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
 	}
-
-	var timeFilter string
+	if q.Clause != "" {
+		conditions = append(conditions, q.Clause)
+	}
 	if fromNs != 0 || toNs != 0 {
-		timeFilter = fmt.Sprintf("\nAND %s BETWEEN %d AND %d", absTimeExpr, fromNs, toNs)
+		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
 	}
-
-	sql := fmt.Sprintf(
-		`SELECT bin_start_ns, count() AS count
-FROM (
-    SELECT intDiv(toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) + %d, %d) * %d - %d AS bin_start_ns
-    FROM %s AS p
-    INNER JOIN (SELECT capture_id, created_at FROM %s%s LIMIT 1 BY capture_id) AS cap ON p.capture_id = cap.capture_id
-    WHERE (p.capture_id, p.packet_id) IN (
-%s
-    )%s
-    LIMIT 1 BY p.capture_id, p.packet_id
-)
-GROUP BY bin_start_ns
-ORDER BY bin_start_ns ASC`,
-		tzOffsetNs, binSizeNs, binSizeNs, tzOffsetNs,
-		t.Packets, t.Captures, capScopeClause,
-		sub, timeFilter,
-	)
-	return sql, nil
+	if len(conditions) > 0 {
+		sb.WriteString("\nWHERE ")
+		sb.WriteString(strings.Join(conditions, " AND "))
+	}
+	if len(breakdown) > 0 {
+		sb.WriteString("\nGROUP BY bin_start_ns, breakdown_value\nORDER BY bin_start_ns ASC")
+	} else {
+		sb.WriteString("\nGROUP BY bin_start_ns\nORDER BY bin_start_ns ASC")
+	}
+	return sb.String(), nil
 }
 
 // validateComponents checks that all components referenced are present in Tables.
