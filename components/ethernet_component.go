@@ -8,7 +8,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed ethernet_schema.sql
@@ -16,8 +15,9 @@ var ethernetSchemaSQL string
 
 // EthernetComponent stores raw ethernet header bytes.
 type EthernetComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 	SrcMAC    []byte `ch:"src"`
 	DstMAC    []byte `ch:"dst"`
@@ -42,7 +42,8 @@ func (c *EthernetComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *EthernetComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -68,9 +69,9 @@ func (c *EthernetComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *EthernetComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *EthernetComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var src, dst string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(&c.PacketID, &src, &dst, &c.EtherType, &c.Length)
 	c.SrcMAC, c.DstMAC = []byte(src), []byte(dst)
 	return c.PacketID, err

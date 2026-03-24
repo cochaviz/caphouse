@@ -8,7 +8,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed linuxsll_schema.sql
@@ -16,8 +15,9 @@ var linuxsllSchemaSQL string
 
 // LinuxSLLComponent stores raw SLL header bytes.
 type LinuxSLLComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 	L2Len        uint16    `ch:"l2_len"`
 	L2HdrRaw     []byte    `ch:"l2_hdr_raw"`
@@ -40,7 +40,8 @@ func (c *LinuxSLLComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *LinuxSLLComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -63,9 +64,9 @@ func (c *LinuxSLLComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *LinuxSLLComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *LinuxSLLComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var raw string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(&c.PacketID, &c.L2Len, &raw)
 	c.L2HdrRaw = []byte(raw)
 	return c.PacketID, err

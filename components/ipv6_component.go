@@ -10,7 +10,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed ipv6_schema.sql
@@ -18,8 +17,9 @@ var ipv6SchemaSQL string
 
 // IPv6Component stores parsed IPv6 fields.
 type IPv6Component struct {
-	CaptureID uuid.UUID `ch:"capture_id"`
-	PacketID  uint64    `ch:"packet_id"`
+	SessionID uint64 `ch:"session_id"`
+	Ts        int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -52,7 +52,7 @@ func (c *IPv6Component) ClickhouseColumns() ([]string, error) {
 // ClickhouseValues overrides reflection to convert netip.Addr to strings.
 func (c *IPv6Component) ClickhouseValues() ([]any, error) {
 	return []any{
-		c.CaptureID, c.PacketID, c.CodecVersion,
+		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
 		c.ParsedOK, shortErr(c.ParseErr), c.Protocol,
 		ipv6String(c.SrcIP6), ipv6String(c.DstIP6),
 		c.IPv6PayloadLen, c.IPv6HopLimit, c.IPv6FlowLabel, c.IPv6TrafficClass,
@@ -60,7 +60,8 @@ func (c *IPv6Component) ClickhouseValues() ([]any, error) {
 }
 
 func (c *IPv6Component) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -87,9 +88,9 @@ func (c *IPv6Component) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *IPv6Component) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *IPv6Component) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var src, dst string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(
 		&c.PacketID, &c.ParsedOK, &c.ParseErr, &c.Protocol,
 		&src, &dst,

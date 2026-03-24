@@ -78,7 +78,7 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	}
 
 	indexes := []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_capture (capture_id) TYPE set(10000) GRANULARITY 1", packetsTable),
+		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_session (session_id) TYPE set(10000) GRANULARITY 1", packetsTable),
 	}
 	for _, ctor := range components.ComponentFactories {
 		proto := ctor()

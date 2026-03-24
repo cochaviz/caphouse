@@ -11,13 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"caphouse"
-
-	"github.com/google/uuid"
 )
 
 // ingestProgress tracks bytes read and packets ingested atomically.
@@ -161,25 +160,6 @@ func newLogger(debug, silent bool) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 }
 
-// capHouseNamespace is a fixed UUID v5 namespace for deterministic capture IDs.
-var capHouseNamespace = uuid.MustParse("3f6a9c2e-1b84-5d70-a3f2-7e4c8b9d0f1e")
-
-// parseCaptureID parses a capture UUID string. If input is empty or "new",
-// a fresh random UUID is returned with isNew=true. Returns an error when
-// allowNew is false and no valid UUID is provided.
-func parseCaptureID(input string, allowNew bool) (uuid.UUID, bool, error) {
-	if input == "" || input == "new" {
-		if !allowNew {
-			return uuid.Nil, false, fmt.Errorf("capture id is required")
-		}
-		return uuid.New(), true, nil
-	}
-	id, err := uuid.Parse(input)
-	if err != nil {
-		return uuid.Nil, false, fmt.Errorf("invalid capture id: %w", err)
-	}
-	return id, false, nil
-}
 
 // newClient constructs a caphouse.Client from a CLI config.
 func newClient(ctx context.Context, cfg config, logger *slog.Logger) (*caphouse.Client, error) {
@@ -233,11 +213,19 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// sumToPacketIDBase extracts the packet-ID base from a file-content hash:
-// bytes [8:12] of the SHA-256 sum, shifted left 32 to reserve the lower 32
-// bits for the per-packet sequential offset.
-func sumToPacketIDBase(sum []byte) uint64 {
-	return uint64(binary.BigEndian.Uint32(sum[8:12])) << 32
+// parseSessionID parses a decimal uint64 session ID string.
+func parseSessionID(input string) (uint64, error) {
+	id, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid session id %q (expected decimal uint64): %w", input, err)
+	}
+	return id, nil
+}
+
+// sumToSessionID derives a stable session ID from the first 8 bytes of a
+// SHA-256 hash of (basename + file content). Zero collision risk in practice.
+func sumToSessionID(sum []byte) uint64 {
+	return binary.BigEndian.Uint64(sum[0:8])
 }
 
 // resolveInputFiles expands a list of file path patterns into concrete file
@@ -274,12 +262,12 @@ func resolveInputFiles(patterns []string) ([]string, error) {
 	return out, nil
 }
 
-// stablePacketIDBase computes the packet-ID base for in-memory PCAP data.
+// stableSessionID computes the session ID for in-memory PCAP data.
 // It is the functional equivalent of the streaming hash in openSource and
 // yields identical results for the same file.
-func stablePacketIDBase(name string, data []byte) uint64 {
+func stableSessionID(name string, data []byte) uint64 {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00", name)
 	h.Write(data)
-	return sumToPacketIDBase(h.Sum(nil))
+	return sumToSessionID(h.Sum(nil))
 }

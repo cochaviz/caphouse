@@ -23,7 +23,7 @@ func encodePacket(linkType uint32, p Packet) codecPacket {
 	}
 
 	nucleus := components.PacketNucleus{
-		CaptureID:  p.CaptureID,
+		SessionID:  p.SessionID,
 		PacketID:   p.PacketID,
 		Timestamp:  p.Timestamp,
 		InclLen:    p.InclLen,

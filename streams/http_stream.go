@@ -33,15 +33,15 @@ func (HTTPProtocol) Detect(payload []byte) bool {
 	return bytes.HasPrefix(payload, []byte("HTTP/"))
 }
 
-func (HTTPProtocol) NewSession(streamID, captureID uuid.UUID) Session {
-	return &HTTPSession{streamID: streamID, captureID: captureID}
+func (HTTPProtocol) NewSession(streamID uuid.UUID, sessionID uint64) Session {
+	return &HTTPSession{streamID: streamID, sessionID: sessionID}
 }
 
 // HTTPSession extracts the request method, host and path from the first
 // payload chunk of an HTTP/1.x stream.
 type HTTPSession struct {
 	streamID  uuid.UUID
-	captureID uuid.UUID
+	sessionID uint64
 	method    string
 	host      string
 	path      string
@@ -80,8 +80,8 @@ func (s *HTTPSession) Feed(payload []byte) {
 
 func (s *HTTPSession) Table() string    { return "stream_http" }
 func (s *HTTPSession) Columns() []string {
-	return []string{"capture_id", "stream_id", "method", "host", "path"}
+	return []string{"session_id", "stream_id", "method", "host", "path"}
 }
 func (s *HTTPSession) Values() []any {
-	return []any{s.captureID, s.streamID, s.method, s.host, s.path}
+	return []any{s.sessionID, s.streamID, s.method, s.host, s.path}
 }

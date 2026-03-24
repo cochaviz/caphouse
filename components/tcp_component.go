@@ -9,7 +9,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed tcp_schema.sql
@@ -34,8 +33,9 @@ const (
 // options_raw holds raw bytes 20..data_offset*4 from the original header,
 // enabling bit-perfect frame reconstruction without checksum recomputation.
 type TCPComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
 	SrcPort    uint16 `ch:"src"`
@@ -67,7 +67,8 @@ func (c *TCPComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *TCPComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -101,9 +102,9 @@ func (c *TCPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *TCPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *TCPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var optRaw string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(
 		&c.PacketID,
 		&c.SrcPort, &c.DstPort,

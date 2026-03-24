@@ -1,8 +1,9 @@
 
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
-  capture_id UUID,
-  packet_id  UInt64 CODEC(Delta, LZ4),
+  session_id  UInt64 CODEC(LZ4),
+  ts          Int64  CODEC(Delta, LZ4),
+  packet_id  UInt32 CODEC(Delta, LZ4),
 
   codec_version UInt16,
 
@@ -13,4 +14,4 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   type          UInt16
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (capture_id, packet_id, tag_index)
+ORDER BY (ts, session_id, packet_id, tag_index)

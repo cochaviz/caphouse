@@ -9,7 +9,6 @@ import (
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
-	"github.com/google/uuid"
 )
 
 const (
@@ -64,8 +63,8 @@ var OrderRepeatable = map[uint]bool{
 
 // PacketNucleus represents the primary row in pcap_packets, holding per-packet metadata and the component bitmask.
 type PacketNucleus struct {
-	CaptureID uuid.UUID
-	PacketID  uint64
+	SessionID uint64
+	PacketID  uint32
 	Timestamp time.Time
 	InclLen   uint32
 	OrigLen   uint32
@@ -141,7 +140,7 @@ type Component interface {
 	Schema(table string) string
 	Indexes(table string) []string
 	FetchOrderBy() string
-	ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error)
+	ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error)
 }
 
 func NewComponentMask(bits ...uint) *big.Int {
@@ -231,7 +230,7 @@ func GetDataColumnsFrom(v any, tableAlias string) ([]string, error) {
 		return nil, err
 	}
 	withAlias := tableAlias != ""
-	alwaysExclude := map[string]bool{"capture_id": true, "codec_version": true}
+	alwaysExclude := map[string]bool{"session_id": true, "codec_version": true, "ts": true}
 
 	cols := make([]string, 0, len(all))
 	for _, col := range all {

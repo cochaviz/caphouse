@@ -14,7 +14,6 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/google/uuid"
 )
 
 const (
@@ -31,12 +30,6 @@ type Client struct {
 	mu        sync.Mutex
 	batch     []codecPacket
 	lastFlush time.Time
-
-	capturesMu sync.RWMutex
-	// captureStarts maps capture_id → capture CreatedAt so that insertBatch
-	// can store ts as a nanosecond offset from capture start rather than an
-	// absolute timestamp.
-	captureStarts map[uuid.UUID]time.Time
 
 	// streams tracks TCP stream state for L7 protocol detection.
 	streams *streams.Tracker
@@ -102,11 +95,10 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{
-		conn:          conn,
-		cfg:           cfg,
-		log:           logger,
-		lastFlush:     time.Now(),
-		captureStarts: make(map[uuid.UUID]time.Time),
+		conn:      conn,
+		cfg:       cfg,
+		log:       logger,
+		lastFlush: time.Now(),
 	}
 	if !cfg.DisableStreamTracking {
 		c.streams = streams.NewTracker()
@@ -136,7 +128,7 @@ func (c *Client) FinalizeStreams(ctx context.Context) error {
 
 	streamCapturesTable := c.streamCapturesTable()
 	streamCapsBatch, err := c.conn.PrepareBatch(ctx, fmt.Sprintf(
-		"INSERT INTO %s (capture_id, stream_id, l7_proto, proto, src_ip, dst_ip, src_port, dst_port, is_complete, first_packet_id, last_packet_id, packet_count, byte_count) VALUES",
+		"INSERT INTO %s (session_id, stream_id, l7_proto, proto, src_ip, dst_ip, src_port, dst_port, is_complete, first_packet_id, last_packet_id, packet_count, byte_count) VALUES",
 		streamCapturesTable,
 	))
 	if err != nil {
@@ -153,7 +145,7 @@ func (c *Client) FinalizeStreams(ctx context.Context) error {
 		srcIP := addrToIPv6String(s.SynSrcIP)
 		dstIP := addrToIPv6String(s.SynDstIP)
 		if err := streamCapsBatch.Append(
-			s.CaptureID, s.StreamID, protoName, uint8(6),
+			s.SessionID, s.StreamID, protoName, uint8(6),
 			srcIP, dstIP,
 			s.SynSrcPort, s.SynDstPort,
 			s.HasSYN && s.HasSYNACK,
@@ -202,15 +194,3 @@ func addrToIPv6String(addr netip.Addr) string {
 	return addr.String()
 }
 
-func (c *Client) storeCaptureStart(id uuid.UUID, t time.Time) {
-	c.capturesMu.Lock()
-	c.captureStarts[id] = t
-	c.capturesMu.Unlock()
-}
-
-func (c *Client) lookupCaptureStart(id uuid.UUID) (time.Time, bool) {
-	c.capturesMu.RLock()
-	t, ok := c.captureStarts[id]
-	c.capturesMu.RUnlock()
-	return t, ok
-}

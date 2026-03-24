@@ -4,12 +4,10 @@ import (
 	"sort"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // sortTimedRefs sorts a slice of timedPacketRef by the merge key:
-// (absNs ASC, captureCreatedAt ASC, captureID ASC, packetID ASC).
+// (absNs ASC, sessionID ASC, packetID ASC).
 // This mirrors the ORDER BY in fetchSortedPacketRefs and is exported here
 // for use in tests.
 func sortTimedRefs(refs []timedPacketRef) {
@@ -18,13 +16,8 @@ func sortTimedRefs(refs []timedPacketRef) {
 		if a.absNs != b.absNs {
 			return a.absNs < b.absNs
 		}
-		if !a.captureCreatedAt.Equal(b.captureCreatedAt) {
-			return a.captureCreatedAt.Before(b.captureCreatedAt)
-		}
-		ac := a.captureID.String()
-		bc := b.captureID.String()
-		if ac != bc {
-			return ac < bc
+		if a.sessionID != b.sessionID {
+			return a.sessionID < b.sessionID
 		}
 		return a.packetID < b.packetID
 	})
@@ -32,44 +25,38 @@ func sortTimedRefs(refs []timedPacketRef) {
 
 // TestTimedRefSortOrder verifies the cross-capture sort key rules:
 // 1. Packets are sorted by absolute time first.
-// 2. Within the same absolute time, sorted by capture start time.
-// 3. Within the same absolute time and capture start, sorted by capture ID.
-// 4. Within the same capture, original relative order (packetID) is preserved.
+// 2. Within the same absolute time, sorted by session ID.
+// 3. Within the same session, original relative order (packetID) is preserved.
 func TestTimedRefSortOrder(t *testing.T) {
 	epoch := time.Unix(1_700_000_000, 0)
 
-	capA := uuid.MustParse("aaaaaaaa-0000-0000-0000-000000000000")
-	capB := uuid.MustParse("bbbbbbbb-0000-0000-0000-000000000000")
-	capC := uuid.MustParse("cccccccc-0000-0000-0000-000000000000")
-
-	startA := epoch
-	startB := epoch.Add(time.Second) // starts 1 s later
-	startC := epoch                  // same start as A but different UUID
+	var capA uint64 = 0xAAAAAAAA00000000
+	var capB uint64 = 0xBBBBBBBB00000000
+	var capC uint64 = 0xCCCCCCCC00000000
 
 	refs := []timedPacketRef{
-		// capB packet at epoch+5s (absNs = startB + 4s = epoch+5s)
-		{captureID: capB, packetID: 0, absNs: epoch.Add(5 * time.Second).UnixNano(), captureCreatedAt: startB},
+		// capB packet at epoch+5s
+		{sessionID: capB, packetID: 0, absNs: epoch.Add(5 * time.Second).UnixNano()},
 		// capA packet at epoch+3s
-		{captureID: capA, packetID: 2, absNs: epoch.Add(3 * time.Second).UnixNano(), captureCreatedAt: startA},
+		{sessionID: capA, packetID: 2, absNs: epoch.Add(3 * time.Second).UnixNano()},
 		// capA packet at epoch+1s
-		{captureID: capA, packetID: 0, absNs: epoch.Add(1 * time.Second).UnixNano(), captureCreatedAt: startA},
+		{sessionID: capA, packetID: 0, absNs: epoch.Add(1 * time.Second).UnixNano()},
 		// capA packet at epoch+2s
-		{captureID: capA, packetID: 1, absNs: epoch.Add(2 * time.Second).UnixNano(), captureCreatedAt: startA},
-		// capC packet at same time as capA's packet 1 (tie: capA starts before capC? No, same start)
-		// capA < capC lexicographically, so capA wins the tie.
-		{captureID: capC, packetID: 0, absNs: epoch.Add(2 * time.Second).UnixNano(), captureCreatedAt: startC},
+		{sessionID: capA, packetID: 1, absNs: epoch.Add(2 * time.Second).UnixNano()},
+		// capC packet at same time as capA's packet 1; capA < capC numerically.
+		{sessionID: capC, packetID: 0, absNs: epoch.Add(2 * time.Second).UnixNano()},
 		// capB packet at epoch+4s
-		{captureID: capB, packetID: 1, absNs: epoch.Add(4 * time.Second).UnixNano(), captureCreatedAt: startB},
+		{sessionID: capB, packetID: 1, absNs: epoch.Add(4 * time.Second).UnixNano()},
 	}
 
 	sortTimedRefs(refs)
 
 	want := []struct {
-		captureID uuid.UUID
-		packetID  uint64
+		sessionID uint64
+		packetID  uint32
 	}{
 		{capA, 0}, // epoch+1s
-		{capA, 1}, // epoch+2s — capA before capC (same absNs, same startTime, capA < capC by UUID)
+		{capA, 1}, // epoch+2s — capA before capC (same absNs, capA < capC numerically)
 		{capC, 0}, // epoch+2s
 		{capA, 2}, // epoch+3s
 		{capB, 1}, // epoch+4s
@@ -80,33 +67,32 @@ func TestTimedRefSortOrder(t *testing.T) {
 		t.Fatalf("got %d refs, want %d", len(refs), len(want))
 	}
 	for i, w := range want {
-		if refs[i].captureID != w.captureID || refs[i].packetID != w.packetID {
-			t.Errorf("refs[%d] = {%s, pkt=%d}, want {%s, pkt=%d}",
-				i, refs[i].captureID, refs[i].packetID, w.captureID, w.packetID)
+		if refs[i].sessionID != w.sessionID || refs[i].packetID != w.packetID {
+			t.Errorf("refs[%d] = {%d, pkt=%d}, want {%d, pkt=%d}",
+				i, refs[i].sessionID, refs[i].packetID, w.sessionID, w.packetID)
 		}
 	}
 }
 
 // TestTimedRefStabilityWithinCapture verifies that packets from the same
-// capture maintain their original relative order when absolute times differ.
+// session maintain their original relative order when absolute times differ.
 func TestTimedRefStabilityWithinCapture(t *testing.T) {
 	epoch := time.Unix(1_700_000_000, 0)
-	capA := uuid.MustParse("aaaaaaaa-0000-0000-0000-000000000000")
+	var capA uint64 = 0xAAAAAAAA00000000
 
 	refs := []timedPacketRef{
-		{captureID: capA, packetID: 4, absNs: epoch.Add(4 * time.Second).UnixNano()},
-		{captureID: capA, packetID: 0, absNs: epoch.Add(0 * time.Second).UnixNano()},
-		{captureID: capA, packetID: 2, absNs: epoch.Add(2 * time.Second).UnixNano()},
-		{captureID: capA, packetID: 1, absNs: epoch.Add(1 * time.Second).UnixNano()},
-		{captureID: capA, packetID: 3, absNs: epoch.Add(3 * time.Second).UnixNano()},
+		{sessionID: capA, packetID: 4, absNs: epoch.Add(4 * time.Second).UnixNano()},
+		{sessionID: capA, packetID: 0, absNs: epoch.Add(0 * time.Second).UnixNano()},
+		{sessionID: capA, packetID: 2, absNs: epoch.Add(2 * time.Second).UnixNano()},
+		{sessionID: capA, packetID: 1, absNs: epoch.Add(1 * time.Second).UnixNano()},
+		{sessionID: capA, packetID: 3, absNs: epoch.Add(3 * time.Second).UnixNano()},
 	}
 
 	sortTimedRefs(refs)
 
 	for i, ref := range refs {
-		if ref.packetID != uint64(i) {
+		if ref.packetID != uint32(i) {
 			t.Errorf("refs[%d].packetID = %d, want %d", i, ref.packetID, i)
 		}
 	}
 }
-

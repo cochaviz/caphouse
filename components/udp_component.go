@@ -9,7 +9,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed udp_schema.sql
@@ -17,8 +16,9 @@ var udpSchemaSQL string
 
 // UDPComponent stores parsed UDP header fields.
 type UDPComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
 	SrcPort  uint16 `ch:"src"`
@@ -44,7 +44,8 @@ func (c *UDPComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *UDPComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -66,8 +67,8 @@ func (c *UDPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *UDPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
-	c.CaptureID = captureID
+func (c *UDPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
+	c.SessionID = sessionID
 	err := rows.Scan(&c.PacketID, &c.SrcPort, &c.DstPort, &c.Length, &c.Checksum)
 	return c.PacketID, err
 }

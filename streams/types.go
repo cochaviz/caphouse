@@ -12,7 +12,7 @@ type Protocol interface {
 // and have their own per-stream table.
 type SessionProtocol interface {
 	Protocol
-	NewSession(streamID, captureID uuid.UUID) Session
+	NewSession(streamID uuid.UUID, sessionID uint64) Session
 }
 
 // Session accumulates L7 data from payload bytes for a single stream.

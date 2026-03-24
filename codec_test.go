@@ -13,7 +13,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
 
 const (
@@ -57,7 +56,7 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 	frame := buildEthernetFrame(testEtherTypeIPv4, append(ipHeader, payload...))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  1,
 		Timestamp: time.Unix(1700000000, 0),
 		InclLen:   uint32(len(frame)),
@@ -98,7 +97,7 @@ func TestCodecIPv6WithHopByHop(t *testing.T) {
 	frame := buildEthernetFrame(testEtherTypeIPv6, append(ipHeader, payload...))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  3,
 		Timestamp: time.Unix(1700000002, 0),
 		InclLen:   uint32(len(frame)),
@@ -128,7 +127,7 @@ func TestCodecNonIPFallback(t *testing.T) {
 	frame := buildEthernetFrame(0x0806, payload)
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  4,
 		Timestamp: time.Unix(1700000003, 0),
 		InclLen:   uint32(len(frame)),
@@ -159,7 +158,7 @@ func TestCodecRawLinkType(t *testing.T) {
 	frame := append(ipHeader, payload...)
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  5,
 		Timestamp: time.Unix(1700000004, 0),
 		InclLen:   uint32(len(frame)),
@@ -212,7 +211,7 @@ func TestCodecIPv4UDP(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  10,
 		Timestamp: time.Unix(1700000100, 0),
 		InclLen:   uint32(len(frame)),
@@ -273,7 +272,7 @@ func TestCodecIPv6UDP(t *testing.T) {
 	frame := serializeLayers(t, eth, ip6, udp, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  11,
 		Timestamp: time.Unix(1700000101, 0),
 		InclLen:   uint32(len(frame)),
@@ -340,7 +339,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  12,
 		Timestamp: time.Unix(1700000102, 0),
 		InclLen:   uint32(len(frame)),
@@ -377,7 +376,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 func TestCodecUnsupportedLinkType(t *testing.T) {
 	frame := []byte{0x01, 0x02, 0x03}
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  6,
 		Timestamp: time.Unix(1700000005, 0),
 		InclLen:   uint32(len(frame)),
@@ -414,7 +413,7 @@ func TestCodecTruncatedBit(t *testing.T) {
 	ipHeader := buildIPv4Header(nil, 0)
 	frame := buildEthernetFrame(testEtherTypeIPv4, ipHeader)
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  7,
 		Timestamp: time.Unix(1700000006, 0),
 		InclLen:   uint32(len(frame)),
@@ -471,7 +470,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 		t.Fatalf("read input: %v", err)
 	}
 	order := byteOrder(meta.Endianness)
-	packetID := uint64(0)
+	packetID := uint32(0)
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if err == io.EOF {
@@ -482,7 +481,7 @@ func TestCodecPCAPRoundTrip(t *testing.T) {
 		}
 
 		encoded := encodePacket(uint32(meta.LinkType), Packet{
-			CaptureID: uuid.New(),
+			SessionID: 1,
 			PacketID:  packetID,
 			Timestamp: ci.Timestamp,
 			InclLen:   uint32(ci.CaptureLength),
@@ -584,7 +583,7 @@ func TestDNSEncodeDecode(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, dns)
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  100,
 		Timestamp: time.Unix(1700000200, 0),
 		InclLen:   uint32(len(frame)),
@@ -682,7 +681,7 @@ func TestNTPEncodeDecode(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, ntp)
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  200,
 		Timestamp: time.Unix(1700000300, 0),
 		InclLen:   uint32(len(frame)),
@@ -752,7 +751,7 @@ func TestDNSTruncatedPayload(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badDNS))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  300,
 		Timestamp: time.Unix(1700000400, 0),
 		InclLen:   uint32(len(frame)),
@@ -825,7 +824,7 @@ func TestDNSMalformedQuestions(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badDNS))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  301,
 		Timestamp: time.Unix(1700000401, 0),
 		InclLen:   uint32(len(frame)),
@@ -890,7 +889,7 @@ func TestNTPTruncatedPayload(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, udp, gopacket.Payload(badNTP))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  302,
 		Timestamp: time.Unix(1700000402, 0),
 		InclLen:   uint32(len(frame)),
@@ -1002,7 +1001,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 	frame := serializeLayers(t, eth, tag1, tag2, ip4, udp, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  20,
 		Timestamp: time.Unix(1700000400, 0),
 		InclLen:   uint32(len(frame)),
@@ -1058,7 +1057,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 	frame := serializeLayers(t, eth, ip4, tcp, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  21,
 		Timestamp: time.Unix(1700000401, 0),
 		InclLen:   uint32(len(frame)),
@@ -1114,7 +1113,7 @@ func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
 	frame := serializeLayers(t, eth, ip6, icmp, echo, gopacket.Payload(payload))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  22,
 		Timestamp: time.Unix(1700000402, 0),
 		InclLen:   uint32(len(frame)),
@@ -1143,7 +1142,7 @@ func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 	frame := buildEthernetFrame(testEtherTypeIPv4, append(ipHeader, partialUDP...))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  30,
 		Timestamp: time.Unix(1700000500, 0),
 		InclLen:   uint32(len(frame)),
@@ -1197,7 +1196,7 @@ func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 	frame := buildEthernetFrame(testEtherTypeIPv4, append(ipHeader, partialTCP...))
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  31,
 		Timestamp: time.Unix(1700000501, 0),
 		InclLen:   uint32(len(frame)),
@@ -1248,7 +1247,7 @@ func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
 	frame := buildEthernetFrame(testEtherTypeIPv4, partialIPv4)
 
 	packet := Packet{
-		CaptureID: uuid.New(),
+		SessionID: 1,
 		PacketID:  32,
 		Timestamp: time.Unix(1700000502, 0),
 		InclLen:   uint32(len(frame)),

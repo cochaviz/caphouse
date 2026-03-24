@@ -10,7 +10,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed arp_schema.sql
@@ -18,8 +17,9 @@ var arpSchemaSQL string
 
 // ARPComponent stores parsed ARP header fields.
 type ARPComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
 	ArpOp     uint16   `ch:"arp_op"`
@@ -39,20 +39,21 @@ func (c *ARPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *ARPComponent) ClickhouseColumns() ([]string, error) {
 	return []string{
-		"capture_id", "packet_id", "codec_version",
+		"session_id", "ts", "packet_id", "codec_version",
 		"arp_op", "sender_mac", "sender_ip", "target_mac", "target_ip",
 	}, nil
 }
 
 func (c *ARPComponent) ClickhouseValues() ([]any, error) {
 	return []any{
-		c.CaptureID, c.PacketID, c.CodecVersion,
+		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
 		c.ArpOp, string(c.SenderMAC[:]), c.SenderIP, string(c.TargetMAC[:]), c.TargetIP,
 	}, nil
 }
 
 func (c *ARPComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -87,8 +88,8 @@ func (c *ARPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *ARPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
-	c.CaptureID = captureID
+func (c *ARPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
+	c.SessionID = sessionID
 	var senderMAC, targetMAC string
 	var senderIP, targetIP net.IP
 	err := rows.Scan(&c.PacketID, &c.ArpOp, &senderMAC, &senderIP, &targetMAC, &targetIP)

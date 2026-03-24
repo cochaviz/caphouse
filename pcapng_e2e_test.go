@@ -5,13 +5,15 @@ package caphouse
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
 
 // TestE2EPcapNgCompat verifies that pcapng files can be ingested without error
@@ -45,13 +47,17 @@ func TestE2EPcapNgCompat(t *testing.T) {
 			}
 
 			// IngestPCAPStream must succeed (handles pcapng internally).
-			captureID, err := integrationClient.IngestPCAPStream(ctx, bytes.NewReader(data), uuid.New(), "test", 0, nil)
-			if err != nil {
+			h := sha256.New()
+			fmt.Fprintf(h, "%s\x00", filepath.Base(path))
+			h.Write(data)
+			sessionID := binary.BigEndian.Uint64(h.Sum(nil)[0:8])
+
+			if _, err := integrationClient.IngestPCAPStream(ctx, bytes.NewReader(data), sessionID, "test", nil); err != nil {
 				t.Fatalf("IngestPCAPStream: %v", err)
 			}
 
 			// Exported bytes must be a valid classic PCAP stream.
-			out, err := integrationClient.ExportCaptureBytes(ctx, captureID)
+			out, err := integrationClient.ExportCaptureBytes(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("ExportCaptureBytes: %v", err)
 			}

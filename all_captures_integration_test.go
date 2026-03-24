@@ -127,10 +127,9 @@ func (m *mockMultiCapture) sortedRefs(from, to time.Time) []timedPacketRef {
 				continue
 			}
 			refs = append(refs, timedPacketRef{
-				captureID:        captureID,
-				packetID:         packetID,
-				absNs:            absNs,
-				captureCreatedAt: entry.meta.CreatedAt,
+				captureID: captureID,
+				packetID:  packetID,
+				absNs:     absNs,
 			})
 		}
 	}
@@ -200,52 +199,48 @@ func TestExportAllSortOrder(t *testing.T) {
 	}
 }
 
-// TestExportAllTieBreakByCaptureStart verifies that when two packets have the
-// same absolute timestamp, the one from the earlier-started capture appears
-// first.
-func TestExportAllTieBreakByCaptureStart(t *testing.T) {
+// TestExportAllTieBreakByCaptureID verifies that when two packets have the
+// same absolute timestamp, the one from the lexicographically smaller capture
+// UUID appears first.
+func TestExportAllTieBreakByCaptureID(t *testing.T) {
 	epoch := time.Unix(1_700_001_000, 0).UTC()
 	frame := func(b byte) []byte { return []byte{b, b, b, b} }
 
-	// capEarly starts at epoch-2s; it has a packet AT epoch (offset = 2s).
-	// capLate  starts at epoch-1s; it has a packet AT epoch (offset = 1s).
-	// Both tie at epoch. capEarly's CreatedAt is earlier, so its packet wins.
-	pcapEarly := buildSimplePCAP(t, []struct {
+	// Two captures each containing a single packet at exactly epoch.
+	pcapA := buildSimplePCAP(t, []struct {
 		ts    time.Time
 		frame []byte
 	}{
-		{epoch.Add(-2 * time.Second), frame(0x10)},
 		{epoch, frame(0x11)},
 	})
-	pcapLate := buildSimplePCAP(t, []struct {
+	pcapB := buildSimplePCAP(t, []struct {
 		ts    time.Time
 		frame []byte
 	}{
-		{epoch.Add(-1 * time.Second), frame(0x20)},
 		{epoch, frame(0x21)},
 	})
 
 	mc := newMockMultiCapture(t)
-	mc.ingest(t, pcapEarly, "early.pcap")
-	mc.ingest(t, pcapLate, "late.pcap")
+	idA := mc.ingest(t, pcapA, "a.pcap")
+	idB := mc.ingest(t, pcapB, "b.pcap")
 
-	from := epoch.Add(-3 * time.Second)
+	from := epoch.Add(-time.Second)
 	to := epoch.Add(time.Second)
 	refs := mc.sortedRefs(from, to)
 
-	if len(refs) != 4 {
-		t.Fatalf("got %d refs, want 4", len(refs))
+	if len(refs) != 2 {
+		t.Fatalf("got %d refs, want 2", len(refs))
 	}
 
-	// refs[0]: epoch-2s (capEarly anchor), refs[1]: epoch-1s (capLate anchor),
-	// refs[2]: epoch (capEarly tie), refs[3]: epoch (capLate tie).
-	capMap := mc.captureMap()
-	thirdCap := capMap[refs[2].captureID]
-	fourthCap := capMap[refs[3].captureID]
-
-	if !thirdCap.CreatedAt.Before(fourthCap.CreatedAt) {
-		t.Errorf("tie-break failed: refs[2] from capture starting at %v, refs[3] from %v; want refs[2] earlier",
-			thirdCap.CreatedAt, fourthCap.CreatedAt)
+	// The capture with the lexicographically smaller UUID string must come first.
+	var wantFirst uuid.UUID
+	if idA.String() < idB.String() {
+		wantFirst = idA
+	} else {
+		wantFirst = idB
+	}
+	if refs[0].captureID != wantFirst {
+		t.Errorf("tie-break failed: refs[0].captureID = %s, want smaller UUID %s", refs[0].captureID, wantFirst)
 	}
 }
 

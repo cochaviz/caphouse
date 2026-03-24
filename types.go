@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"caphouse/components"
-
-	"github.com/google/uuid"
 )
 
 // Config controls the ClickHouse connection and ingest behavior.
@@ -26,8 +24,8 @@ type Config struct {
 
 // Packet holds one captured frame with metadata.
 type Packet struct {
-	CaptureID uuid.UUID
-	PacketID  uint64
+	SessionID uint64
+	PacketID  uint32
 	Timestamp time.Time
 	InclLen   uint32
 	OrigLen   uint32
