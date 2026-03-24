@@ -32,11 +32,12 @@ services:
             CLICKHOUSE_PASSWORD: ""
             CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
         healthcheck:
-            test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+            test: [ "CMD", "clickhouse-client", "--query", "SELECT 1" ]
             interval: 5s
             timeout: 5s
             retries: 10
             start_period: 10s
+        restart: unless-stopped
         ulimits:
             nofile:
                 soft: 262144

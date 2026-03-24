@@ -82,13 +82,20 @@ func rootCmd() *cobra.Command {
 				ASNV6:  asnSourceV6,
 			}
 			if geoCfg.CityV4 != "" || geoCfg.CityV6 != "" || geoCfg.ASNV4 != "" || geoCfg.ASNV6 != "" {
-				logger.Info("initialising geoip dictionaries",
-					"city_v4", geoCfg.CityV4, "city_v6", geoCfg.CityV6,
-					"asn_v4", geoCfg.ASNV4, "asn_v6", geoCfg.ASNV6)
-				if err := client.InitGeoIP(ctx, geoCfg); err != nil {
-					return fmt.Errorf("init geoip: %w", err)
+				if geoip.DictionariesReady(ctx, client.Conn()) {
+					logger.Info("geoip dictionaries already loaded, skipping init")
+				} else {
+					logger.Info("starting geoip init in background",
+						"city_v4", geoCfg.CityV4, "city_v6", geoCfg.CityV6,
+						"asn_v4", geoCfg.ASNV4, "asn_v6", geoCfg.ASNV6)
+					go func() {
+						if err := client.InitGeoIP(context.Background(), geoCfg); err != nil {
+							logger.Warn("geoip init failed", "err", err)
+							return
+						}
+						logger.Info("geoip dictionaries ready")
+					}()
 				}
-				logger.Info("geoip dictionaries ready")
 			}
 
 			r := chi.NewRouter()

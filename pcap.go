@@ -140,7 +140,7 @@ func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
 func (c *Client) FetchCapturesInRange(ctx context.Context, to time.Time) ([]CaptureMeta, error) {
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s FINAL WHERE created_at <= ? ORDER BY created_at ASC, capture_id ASC",
+		"SELECT %s FROM %s WHERE created_at <= ? ORDER BY created_at ASC, capture_id ASC LIMIT 1 BY capture_id",
 		cols, c.capturesTable(),
 	)
 	rows, err := c.conn.Query(ctx, query, to)

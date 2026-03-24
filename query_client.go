@@ -144,8 +144,8 @@ func (c *Client) queryJSON(ctx context.Context, sql string) ([]map[string]any, e
 // int64, etc.) that marshal cleanly to JSON.
 // When captureIDs is nil or empty, all captures are searched.
 // fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
-func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.Query, comps []string, limit, offset int, fromNs, toNs int64) ([]map[string]any, error) {
-	sql, err := q.SearchSQL(c.tables(), captureIDs, comps, limit, offset, fromNs, toNs)
+func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.Query, comps []string, limit, offset int, fromNs, toNs int64, asc bool) ([]map[string]any, error) {
+	sql, err := q.SearchSQL(c.tables(), captureIDs, comps, limit, offset, fromNs, toNs, asc)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	for _, alias := range allComps {
 		info := t.Components[alias]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s FINAL ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
+			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
 				info.TableRef, alias, alias, alias),
 		)
 	}
@@ -193,8 +193,8 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	var sb strings.Builder
 	sb.WriteString("SELECT\n    ")
 	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	sb.WriteString(fmt.Sprintf("\nFROM %s AS p FINAL", t.Packets))
-	sb.WriteString(fmt.Sprintf("\nINNER JOIN (SELECT capture_id, created_at FROM %s FINAL) cap ON p.capture_id = cap.capture_id", t.Captures))
+	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
+	sb.WriteString(fmt.Sprintf("\nINNER JOIN (SELECT capture_id, created_at FROM %s LIMIT 1 BY capture_id) cap ON p.capture_id = cap.capture_id", t.Captures))
 	for _, j := range joins {
 		sb.WriteString("\n")
 		sb.WriteString(j)
@@ -216,7 +216,7 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 // Returns nil when the packet is not found.
 func (c *Client) QueryPacketFrame(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]byte, error) {
 	q := fmt.Sprintf(
-		"SELECT incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s FINAL WHERE capture_id = ? AND packet_id = ? LIMIT 1",
+		"SELECT incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1",
 		c.packetsTable(),
 	)
 	row := c.conn.QueryRow(ctx, q, captureID, packetID)

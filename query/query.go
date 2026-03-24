@@ -73,10 +73,10 @@ var (
 	// ethBareRe rewrites bare "eth" → "ethernet" (not followed by dot or word char)
 	ethBareRe = regexp.MustCompile(`\beth\b`)
 
-	// fieldAliasRe matches component.alias = value for expansion.
-	// Groups: 1=component, 2=alias, 3=value
+	// fieldAliasRe matches component.alias = value or component.alias != value for expansion.
+	// Groups: 1=component, 2=alias, 3=operator (= or !=), 4=value
 	fieldAliasRe = regexp.MustCompile(
-		`\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s*=\s*('[^']*'|[^\s)]+)`,
+		`\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s*(!=|=)\s*('[^']*'|[^\s)]+)`,
 	)
 
 	// betweenAliasRe matches component.alias BETWEEN lo AND hi.
@@ -89,6 +89,12 @@ var (
 	// Groups: 1=component, 2=alias, 3=list contents
 	inAliasRe = regexp.MustCompile(
 		`(?i)\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s+in\s+\(([^)]+)\)`,
+	)
+
+	// funcAliasRe matches func(component.alias, ...) where the alias is the first argument.
+	// Groups: 1=function name, 2=component, 3=alias, 4=remaining arguments (after the comma)
+	funcAliasRe = regexp.MustCompile(
+		`(?i)\b(\w+)\(\s*(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s*,\s*([^)]*)\)`,
 	)
 
 	// componentDotRe extracts "component." prefixes from the clause.
@@ -186,7 +192,7 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 	var sb strings.Builder
 	sb.WriteString("SELECT p.capture_id, p.packet_id\nFROM ")
 	sb.WriteString(t.Packets)
-	sb.WriteString(" AS p FINAL")
+	sb.WriteString(" AS p")
 
 	for _, comp := range q.components {
 		info := t.Components[comp]
@@ -194,7 +200,7 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 		sb.WriteString(info.TableRef)
 		sb.WriteString(" AS ")
 		sb.WriteString(info.Alias)
-		sb.WriteString(" FINAL USING (capture_id, packet_id)")
+		sb.WriteString(" USING (capture_id, packet_id)")
 	}
 
 	var conditions []string
@@ -208,6 +214,7 @@ func (q Query) Subquery(t Tables, captureIDs []uuid.UUID) (string, []any, error)
 		sb.WriteString("\nWHERE ")
 		sb.WriteString(strings.Join(conditions, " AND "))
 	}
+	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
 
 	return sb.String(), nil, nil
 }
@@ -238,12 +245,12 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 		)
 	}
 
-	fromClause := fmt.Sprintf("FROM %s AS p FINAL", t.Packets)
+	fromClause := fmt.Sprintf("FROM %s AS p", t.Packets)
 	var joins []string
 	for _, comp := range comps {
 		info := t.Components[comp]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s FINAL USING (capture_id, packet_id)", info.TableRef, info.Alias),
+			fmt.Sprintf("LEFT JOIN %s AS %s USING (capture_id, packet_id)", info.TableRef, info.Alias),
 		)
 	}
 
@@ -259,6 +266,7 @@ func (q Query) SQL(t Tables, captureIDs []uuid.UUID, comps []string) (string, er
 	sb.WriteString("\nWHERE (p.capture_id, p.packet_id) IN (\n")
 	sb.WriteString(sub)
 	sb.WriteString("\n)")
+	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
 	return sb.String(), nil
 }
 
@@ -269,7 +277,7 @@ const absTimeExpr = "toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.
 // SearchSQL generates the SQL used by the JSON search API.
 // fromNs and toNs are optional Unix-nanosecond bounds on the absolute packet
 // timestamp (0 = unset). When set, only packets within [fromNs, toNs] are returned.
-func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit, offset int, fromNs, toNs int64) (string, error) {
+func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit, offset int, fromNs, toNs int64, asc bool) (string, error) {
 	if err := q.validateComponents(t); err != nil {
 		return "", err
 	}
@@ -304,14 +312,14 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 	}
 
 	fromClause := fmt.Sprintf(
-		"FROM %s AS p FINAL\nINNER JOIN (SELECT capture_id, created_at FROM %s FINAL%s) cap ON p.capture_id = cap.capture_id",
+		"FROM %s AS p\nINNER JOIN (SELECT capture_id, created_at FROM %s%s LIMIT 1 BY capture_id) cap ON p.capture_id = cap.capture_id",
 		t.Packets, t.Captures, capScopeClause,
 	)
 	var joins []string
 	for _, comp := range comps {
 		info := t.Components[comp]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s FINAL ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
+			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
 				info.TableRef, info.Alias, info.Alias, info.Alias),
 		)
 	}
@@ -331,7 +339,12 @@ func (q Query) SearchSQL(t Tables, captureIDs []uuid.UUID, comps []string, limit
 	if fromNs != 0 || toNs != 0 {
 		sb.WriteString(fmt.Sprintf("\nAND %s BETWEEN %d AND %d", absTimeExpr, fromNs, toNs))
 	}
-	sb.WriteString("\nORDER BY p.capture_id ASC, timestamp_ns ASC")
+	if asc {
+		sb.WriteString("\nORDER BY timestamp_ns ASC")
+	} else {
+		sb.WriteString("\nORDER BY timestamp_ns DESC")
+	}
+	sb.WriteString("\nLIMIT 1 BY p.capture_id, p.packet_id")
 	if limit > 0 {
 		sb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
 	}
@@ -367,14 +380,16 @@ func (q Query) CountsSQL(t Tables, captureIDs []uuid.UUID, binSizeNs int64, from
 	}
 
 	sql := fmt.Sprintf(
-		`SELECT
-    intDiv(toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) + %d, %d) * %d - %d AS bin_start_ns,
-    count() AS count
-FROM %s AS p FINAL
-INNER JOIN (SELECT capture_id, created_at FROM %s FINAL%s) cap ON p.capture_id = cap.capture_id
-WHERE (p.capture_id, p.packet_id) IN (
+		`SELECT bin_start_ns, count() AS count
+FROM (
+    SELECT intDiv(toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) + %d, %d) * %d - %d AS bin_start_ns
+    FROM %s AS p
+    INNER JOIN (SELECT capture_id, created_at FROM %s%s LIMIT 1 BY capture_id) AS cap ON p.capture_id = cap.capture_id
+    WHERE (p.capture_id, p.packet_id) IN (
 %s
-)%s
+    )%s
+    LIMIT 1 BY p.capture_id, p.packet_id
+)
 GROUP BY bin_start_ns
 ORDER BY bin_start_ns ASC`,
 		tzOffsetNs, binSizeNs, binSizeNs, tzOffsetNs,
@@ -397,19 +412,25 @@ func (q Query) validateComponents(t Tables) error {
 // expandFieldAliases rewrites field alias patterns (=, BETWEEN, IN) so that
 // "component.alias op ..." expands to "(component.field1 op ... or component.field2 op ...)".
 func expandFieldAliases(clause string) string {
-	// = value
+	// = value  or  != value
 	clause = fieldAliasRe.ReplaceAllStringFunc(clause, func(match string) string {
 		parts := fieldAliasRe.FindStringSubmatch(match)
-		if len(parts) < 4 {
+		if len(parts) < 5 {
 			return match
 		}
-		comp, alias, val := parts[1], parts[2], parts[3]
+		comp, alias, op, val := parts[1], parts[2], parts[3], parts[4]
 		fields, ok := fieldAliasExpansions[comp+"."+alias]
 		if !ok {
 			return match
 		}
-		return fmt.Sprintf("(%s.%s = %s or %s.%s = %s)",
-			comp, fields[0], val, comp, fields[1], val)
+		// = expands with OR (matches either src or dst)
+		// != expands with AND (neither src nor dst matches)
+		join := "or"
+		if op == "!=" {
+			join = "and"
+		}
+		return fmt.Sprintf("(%s.%s %s %s %s %s.%s %s %s)",
+			comp, fields[0], op, val, join, comp, fields[1], op, val)
 	})
 
 	// BETWEEN lo AND hi
@@ -440,6 +461,21 @@ func expandFieldAliases(clause string) string {
 		}
 		return fmt.Sprintf("(%s.%s in (%s) or %s.%s in (%s))",
 			comp, fields[0], list, comp, fields[1], list)
+	})
+
+	// func(component.alias, args) — alias as first function argument
+	clause = funcAliasRe.ReplaceAllStringFunc(clause, func(match string) string {
+		parts := funcAliasRe.FindStringSubmatch(match)
+		if len(parts) < 5 {
+			return match
+		}
+		fn, comp, alias, args := parts[1], parts[2], parts[3], parts[4]
+		fields, ok := fieldAliasExpansions[comp+"."+alias]
+		if !ok {
+			return match
+		}
+		return fmt.Sprintf("(%s(%s.%s, %s) or %s(%s.%s, %s))",
+			fn, comp, fields[0], args, fn, comp, fields[1], args)
 	})
 
 	return clause

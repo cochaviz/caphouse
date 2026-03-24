@@ -107,7 +107,7 @@ retry_failed() {
             [ -f "$f" ] || continue
             # Skip the file tcpdump currently has open.
             file_open_by "$f" "$TCPDUMP_PID" && continue
-            ingest "$f"
+            ingest "$f" || true
         done
     done
 }
@@ -125,7 +125,7 @@ cleanup() {
     kill "$TCPDUMP_PID" 2>/dev/null
     wait "$TCPDUMP_PID" 2>/dev/null
     for f in "$DIR"/ring_*.pcap; do
-        [ -f "$f" ] && ingest "$f"
+        [ -f "$f" ] && { ingest "$f" || true; }
     done
 }
 trap cleanup INT TERM EXIT
@@ -140,7 +140,7 @@ case "$(uname)" in
             for f in "$DIR"/ring_*.pcap; do
                 [ -f "$f" ] || continue
                 lsof -a -p "$TCPDUMP_PID" -- "$f" >/dev/null 2>&1 && continue
-                ingest "$f"
+                ingest "$f" || true
             done
             sleep 2
         done
@@ -148,7 +148,7 @@ case "$(uname)" in
     *)
         # close_write fires only after tcpdump has closed the completed file.
         inotifywait -m -e close_write --format '%w%f' "$DIR" | while read -r FILE; do
-            ingest "$FILE"
+            ingest "$FILE" || true
         done
         ;;
 esac
