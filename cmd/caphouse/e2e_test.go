@@ -19,7 +19,6 @@ import (
 	"caphouse"
 
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 	tccontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/clickhouse"
 )
@@ -157,34 +156,28 @@ func splitPCAP(t *testing.T, data []byte, n int) [][]byte {
 	return results
 }
 
-// ingestPCAPStream is a thin wrapper around the client method that threads an
-// ingestProgress counter through the onPacket callback.
-func ingestPCAPStream(ctx context.Context, client *caphouse.Client, r io.Reader, captureID uuid.UUID, sensor string, p *ingestProgress, base uint64) (uuid.UUID, error) {
-	return client.IngestPCAPStream(ctx, r, captureID, sensor, base, func() { p.packets.Add(1) })
-}
-
-// ingestAll ingests pcapData under captureID using the real CLI ingestPCAPStream.
-func ingestAll(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData []byte, filename string) {
+// ingestAll ingests pcapData as filename and returns the derived session ID.
+func ingestAll(ctx context.Context, t *testing.T, pcapData []byte, filename string) uint64 {
 	t.Helper()
-	base := stablePacketIDBase(filename, pcapData)
-	if _, err := ingestPCAPStream(ctx, cliClient, bytes.NewReader(pcapData), captureID, "test", &ingestProgress{}, base); err != nil {
+	sessionID := stableSessionID(filename, pcapData)
+	if _, err := cliClient.IngestPCAPStream(ctx, bytes.NewReader(pcapData), sessionID, "test", func() {}); err != nil {
 		t.Fatalf("ingestAll %q: %v", filename, err)
 	}
+	return sessionID
 }
 
 // crashAfter ingests the first n packets from pcapData without flushing,
 // simulating a process crash before the batch is sent to ClickHouse.
-func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData []byte, filename string, n int) {
+func crashAfter(ctx context.Context, t *testing.T, pcapData []byte, filename string, n int) uint64 {
 	t.Helper()
-	base := stablePacketIDBase(filename, pcapData)
+	sessionID := stableSessionID(filename, pcapData)
 
 	meta, err := caphouse.ParseGlobalHeader(pcapData[:24])
 	if err != nil {
 		t.Fatalf("crashAfter %q: parse header: %v", filename, err)
 	}
-	meta.CaptureID = captureID
+	meta.SessionID = sessionID
 	meta.SensorID = "test"
-	meta.CreatedAt = parsePackets(t, pcapData)[0].ts // anchor to first packet, matching IngestPCAPStream
 	meta.GlobalHeaderRaw = pcapData[:24]
 
 	if _, err := cliClient.CreateCapture(ctx, meta); err != nil {
@@ -195,7 +188,7 @@ func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData
 	if err != nil {
 		t.Fatalf("crashAfter %q: pcapgo reader: %v", filename, err)
 	}
-	var seq uint64
+	var seq uint32
 	for i := 0; i < n; i++ {
 		frame, ci, err := reader.ReadPacketData()
 		if errors.Is(err, io.EOF) {
@@ -205,8 +198,8 @@ func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData
 			t.Fatalf("crashAfter %q: read packet: %v", filename, err)
 		}
 		if err := cliClient.IngestPacket(ctx, meta.LinkType, caphouse.Packet{
-			CaptureID: captureID,
-			PacketID:  base | seq,
+			SessionID: sessionID,
+			PacketID:  seq,
 			Timestamp: ci.Timestamp,
 			InclLen:   uint32(ci.CaptureLength),
 			OrigLen:   uint32(ci.Length),
@@ -217,6 +210,7 @@ func crashAfter(ctx context.Context, t *testing.T, captureID uuid.UUID, pcapData
 		seq++
 	}
 	// Intentionally no Flush — simulates crash.
+	return sessionID
 }
 
 // pcapPaths returns all *.pcap files under testdata/ relative to this package.
@@ -244,11 +238,10 @@ func TestE2EDuplicateIngest(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			name := filepath.Base(path)
-			captureID := uuid.New()
-			ingestAll(ctx, t, captureID, pcapData, name)
-			ingestAll(ctx, t, captureID, pcapData, name)
+			sessionID := ingestAll(ctx, t, pcapData, name)
+			ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("export: %v", err)
 			}
@@ -272,11 +265,10 @@ func TestE2EPartialCrashResume(t *testing.T) {
 			if total < 2 {
 				t.Skip("need at least 2 packets")
 			}
-			captureID := uuid.New()
-			crashAfter(ctx, t, captureID, pcapData, name, total/2)
-			ingestAll(ctx, t, captureID, pcapData, name)
+			crashAfter(ctx, t, pcapData, name, total/2)
+			sessionID := ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("export: %v", err)
 			}
@@ -300,14 +292,13 @@ func TestE2EFlushBeforeCrash(t *testing.T) {
 			if total < 2 {
 				t.Skip("need at least 2 packets")
 			}
-			captureID := uuid.New()
-			crashAfter(ctx, t, captureID, pcapData, name, total/2)
+			crashAfter(ctx, t, pcapData, name, total/2)
 			if err := cliClient.Flush(ctx); err != nil {
 				t.Fatalf("flush: %v", err)
 			}
-			ingestAll(ctx, t, captureID, pcapData, name)
+			sessionID := ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
+			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("export: %v", err)
 			}
@@ -317,7 +308,7 @@ func TestE2EFlushBeforeCrash(t *testing.T) {
 }
 
 // TestE2EConcurrentRings splits each PCAP into 2 ring files and ingests them
-// concurrently under the same captureID.
+// concurrently. Each ring is its own session; we export both and compare total.
 func TestE2EConcurrentRings(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range pcapPaths(t) {
@@ -327,42 +318,32 @@ func TestE2EConcurrentRings(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			rings := splitPCAP(t, pcapData, 2)
-			captureID := uuid.New()
 
-			// Pre-create the capture anchored to the globally-earliest packet
-			// timestamp (packet 0, always in ring 0 after round-robin split).
-			// Without this, whichever ring wins the CreateCapture race sets
-			// CreatedAt, and any ring with an earlier first packet would have
-			// those packets clamped to tsOffsetNs=0 and exported with the
-			// wrong timestamp.
-			anchorMeta, err := caphouse.ParseGlobalHeader(pcapData[:24])
-			if err != nil {
-				t.Fatalf("parse header: %v", err)
-			}
-			anchorMeta.CaptureID = captureID
-			anchorMeta.SensorID = "test"
-			anchorMeta.CreatedAt = parsePackets(t, pcapData)[0].ts
-			if _, err := cliClient.CreateCapture(ctx, anchorMeta); err != nil {
-				t.Fatalf("pre-create capture: %v", err)
-			}
-
+			var mu sync.Mutex
+			sessionIDs := make([]uint64, len(rings))
 			var wg sync.WaitGroup
 			for i, ring := range rings {
 				wg.Add(1)
-				ringData := ring
+				i, ringData := i, ring
 				ringName := fmt.Sprintf("ring%d.pcap", i)
 				go func() {
 					defer wg.Done()
-					ingestAll(ctx, t, captureID, ringData, ringName)
+					sid := ingestAll(ctx, t, ringData, ringName)
+					mu.Lock()
+					sessionIDs[i] = sid
+					mu.Unlock()
 				}()
 			}
 			wg.Wait()
 
-			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-			if err != nil {
-				t.Fatalf("export: %v", err)
+			var gotPkts []parsedPkt
+			for _, sid := range sessionIDs {
+				data, err := cliClient.ExportCaptureBytes(ctx, sid)
+				if err != nil {
+					t.Fatalf("export session %d: %v", sid, err)
+				}
+				gotPkts = append(gotPkts, parsePackets(t, data)...)
 			}
-			gotPkts := parsePackets(t, got)
 			wantPkts := parsePackets(t, pcapData)
 			if len(gotPkts) != len(wantPkts) {
 				t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))
@@ -383,7 +364,7 @@ func TestE2EConcurrentRings(t *testing.T) {
 }
 
 // TestE2EMonitorRings splits each PCAP into 3 ring files (replicating what
-// caphouse-monitor does) and ingests each under the same captureID.
+// caphouse-monitor does) and ingests each as its own session.
 func TestE2EMonitorRings(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range pcapPaths(t) {
@@ -394,17 +375,17 @@ func TestE2EMonitorRings(t *testing.T) {
 			}
 			const nRings = 3
 			rings := splitPCAP(t, pcapData, nRings)
-			captureID := uuid.New()
 
+			var gotPkts []parsedPkt
 			for i, ring := range rings {
-				ingestAll(ctx, t, captureID, ring, fmt.Sprintf("ring%d.pcap", i))
+				ringName := fmt.Sprintf("ring%d.pcap", i)
+				sid := ingestAll(ctx, t, ring, ringName)
+				data, err := cliClient.ExportCaptureBytes(ctx, sid)
+				if err != nil {
+					t.Fatalf("export ring %d: %v", i, err)
+				}
+				gotPkts = append(gotPkts, parsePackets(t, data)...)
 			}
-
-			got, err := cliClient.ExportCaptureBytes(ctx, captureID)
-			if err != nil {
-				t.Fatalf("export: %v", err)
-			}
-			gotPkts := parsePackets(t, got)
 			wantPkts := parsePackets(t, pcapData)
 			if len(gotPkts) != len(wantPkts) {
 				t.Fatalf("packet count: got %d want %d", len(gotPkts), len(wantPkts))

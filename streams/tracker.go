@@ -14,7 +14,7 @@ const maxPayloadBuf = 1024
 // flowKey is the canonical (bidirectional) 5-tuple key for a TCP stream.
 // lo/hi ordering ensures both directions map to the same key.
 type flowKey struct {
-	captureID uuid.UUID
+	sessionID uint64
 	proto     uint8
 	loIP      [16]byte
 	hiIP      [16]byte
@@ -22,7 +22,7 @@ type flowKey struct {
 	hiPort    uint16
 }
 
-func canonicalKey(captureID uuid.UUID, srcIP, dstIP netip.Addr, srcPort, dstPort uint16) flowKey {
+func canonicalKey(sessionID uint64, srcIP, dstIP netip.Addr, srcPort, dstPort uint16) flowKey {
 	src16 := srcIP.As16()
 	dst16 := dstIP.As16()
 
@@ -40,7 +40,7 @@ func canonicalKey(captureID uuid.UUID, srcIP, dstIP netip.Addr, srcPort, dstPort
 	}
 
 	return flowKey{
-		captureID: captureID,
+		sessionID: sessionID,
 		proto:     6, // TCP
 		loIP:      loIP,
 		hiIP:      hiIP,
@@ -76,8 +76,8 @@ type streamState struct {
 	session    Session  // non-nil only for SessionProtocol
 	payloadBuf []byte   // nil after identification or abandon
 
-	firstPacketID uint64
-	lastPacketID  uint64
+	firstPacketID uint32
+	lastPacketID  uint32
 	packetCount   uint64
 	byteCount     uint64
 }
@@ -134,7 +134,7 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 		return
 	}
 
-	key := canonicalKey(nucleus.CaptureID, srcIP, dstIP, tcpComp.SrcPort, tcpComp.DstPort)
+	key := canonicalKey(nucleus.SessionID, srcIP, dstIP, tcpComp.SrcPort, tcpComp.DstPort)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -176,7 +176,7 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 		if proto := Detect(st.payloadBuf); proto != nil {
 			st.proto = proto
 			if sp, ok := proto.(SessionProtocol); ok {
-				st.session = sp.NewSession(st.streamID, nucleus.CaptureID)
+				st.session = sp.NewSession(st.streamID, nucleus.SessionID)
 			}
 			st.payloadBuf = nil
 		} else if len(st.payloadBuf) >= maxPayloadBuf {
@@ -191,7 +191,7 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 
 // StreamRecord is the exported view of a completed stream for insertion.
 type StreamRecord struct {
-	CaptureID uuid.UUID
+	SessionID uint64
 	StreamID  uuid.UUID
 
 	SynSrcIP   netip.Addr
@@ -205,8 +205,8 @@ type StreamRecord struct {
 	Proto   Protocol
 	Session Session
 
-	FirstPacketID uint64
-	LastPacketID  uint64
+	FirstPacketID uint32
+	LastPacketID  uint32
 	PacketCount   uint64
 	ByteCount     uint64
 }
@@ -225,7 +225,7 @@ func (t *Tracker) QualifyingStreams() []*StreamRecord {
 			continue
 		}
 		out = append(out, &StreamRecord{
-			CaptureID:     key.captureID,
+			SessionID:     key.sessionID,
 			StreamID:      st.streamID,
 			SynSrcIP:      st.synSrcIP,
 			SynDstIP:      st.synDstIP,

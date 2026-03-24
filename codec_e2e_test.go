@@ -10,7 +10,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
 
 type pcapFrame struct {
@@ -44,7 +43,7 @@ func readPCAPFrames(t *testing.T, data []byte) []pcapFrame {
 
 func TestMockClientRoundTripEthernet(t *testing.T) {
 	meta := CaptureMeta{
-		CaptureID:      uuid.New(),
+		SessionID:      1,
 		LinkType:       testLinkTypeEthernet,
 		Endianness:     "le",
 		TimeResolution: "us",
@@ -125,8 +124,8 @@ func TestMockClientRoundTripEthernet(t *testing.T) {
 
 	for i, frame := range frames {
 		err := client.IngestPacket(meta.LinkType, Packet{
-			CaptureID: meta.CaptureID,
-			PacketID:  uint64(i),
+			SessionID: meta.SessionID,
+			PacketID:  uint32(i),
 			Timestamp: frame.ts,
 			InclLen:   uint32(len(frame.data)),
 			OrigLen:   uint32(len(frame.data)),
@@ -158,7 +157,7 @@ func TestMockClientRoundTripEthernet(t *testing.T) {
 
 func TestMockClientRoundTripRawIPv4(t *testing.T) {
 	meta := CaptureMeta{
-		CaptureID:      uuid.New(),
+		SessionID:      1,
 		LinkType:       testLinkTypeRaw,
 		Endianness:     "le",
 		TimeResolution: "us",
@@ -181,7 +180,7 @@ func TestMockClientRoundTripRawIPv4(t *testing.T) {
 	frame := serializeLayers(t, ip4, udp, gopacket.Payload(payload))
 
 	err := client.IngestPacket(meta.LinkType, Packet{
-		CaptureID: meta.CaptureID,
+		SessionID: meta.SessionID,
 		PacketID:  0,
 		Timestamp: time.Unix(1700000300, 4000),
 		InclLen:   uint32(len(frame)),

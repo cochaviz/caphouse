@@ -163,7 +163,7 @@ func TestARPClickhouseColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClickhouseColumns: %v", err)
 	}
-	want := []string{"capture_id", "packet_id", "codec_version", "arp_op", "sender_mac", "sender_ip", "target_mac", "target_ip"}
+	want := []string{"session_id", "ts", "packet_id", "codec_version", "arp_op", "sender_mac", "sender_ip", "target_mac", "target_ip"}
 	if len(cols) != len(want) {
 		t.Fatalf("column count: got %d want %d: %v", len(cols), len(want), cols)
 	}

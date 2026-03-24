@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/google/uuid"
 )
 
 // byteOrder returns the binary byte order for an endianness string ("le"/"be").
@@ -22,11 +20,10 @@ func byteOrder(endian string) binary.ByteOrder {
 
 var errUnsupportedMagic = errors.New("unsupported pcap magic")
 
-// CaptureMeta describes one stored capture's global metadata.
+// CaptureMeta describes one stored session's global metadata.
 type CaptureMeta struct {
-	CaptureID      uuid.UUID
+	SessionID      uint64
 	SensorID       string
-	CreatedAt      time.Time
 	Snaplen        uint32
 	LinkType       uint32 // DLT, for Ethernet use 1
 	Endianness     string // "le" or "be"
@@ -44,7 +41,7 @@ func (CaptureMeta) Table() string { return "pcap_captures" }
 // ClickhouseColumns implements clickhouseMapper.
 func (CaptureMeta) ClickhouseColumns() ([]string, error) {
 	return []string{
-		"capture_id", "sensor_id", "created_at",
+		"session_id", "sensor_id",
 		"endianness", "snaplen", "linktype", "time_res",
 		"global_header_raw", "codec_version", "codec_profile",
 	}, nil
@@ -58,7 +55,7 @@ func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 		raw = []byte{}
 	}
 	return []any{
-		m.CaptureID, m.SensorID, m.CreatedAt,
+		m.SessionID, m.SensorID,
 		m.Endianness, m.Snaplen, m.LinkType, m.TimeResolution,
 		raw, m.CodecVersion, m.CodecProfile,
 	}, nil
@@ -67,7 +64,7 @@ func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 // ScanColumns implements clickhouseMapper.
 func (CaptureMeta) ScanColumns() []string {
 	return []string{
-		"capture_id", "sensor_id", "created_at",
+		"session_id", "sensor_id",
 		"endianness", "snaplen", "linktype", "time_res",
 		"global_header_raw", "codec_version", "codec_profile",
 	}
@@ -123,7 +120,7 @@ func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
 	var m CaptureMeta
 	var headerRaw string
 	if err := scan(
-		&m.CaptureID, &m.SensorID, &m.CreatedAt,
+		&m.SessionID, &m.SensorID,
 		&m.Endianness, &m.Snaplen, &m.LinkType, &m.TimeResolution,
 		&headerRaw,
 		&m.CodecVersion, &m.CodecProfile,
@@ -134,18 +131,16 @@ func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
 	return m, nil
 }
 
-// FetchCapturesInRange returns all captures whose start time (created_at) is
-// at or before to. The caller is responsible for further filtering via
-// QueryPackets; this function only provides the candidate capture set.
-func (c *Client) FetchCapturesInRange(ctx context.Context, to time.Time) ([]CaptureMeta, error) {
+// FetchAllSessions returns all stored session metadata.
+func (c *Client) FetchAllSessions(ctx context.Context) ([]CaptureMeta, error) {
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s WHERE created_at <= ? ORDER BY created_at ASC, capture_id ASC LIMIT 1 BY capture_id",
+		"SELECT %s FROM %s FINAL ORDER BY session_id ASC",
 		cols, c.capturesTable(),
 	)
-	rows, err := c.conn.Query(ctx, query, to)
+	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("fetch captures in range: %w", err)
+		return nil, fmt.Errorf("fetch sessions: %w", err)
 	}
 	defer rows.Close()
 	var captures []CaptureMeta
@@ -159,14 +154,14 @@ func (c *Client) FetchCapturesInRange(ctx context.Context, to time.Time) ([]Capt
 	return captures, rows.Err()
 }
 
-// fetchCaptureMeta retrieves the stored metadata for a capture.
-func (c *Client) fetchCaptureMeta(ctx context.Context, captureID uuid.UUID) (CaptureMeta, error) {
+// fetchCaptureMeta retrieves the stored metadata for a session.
+func (c *Client) fetchCaptureMeta(ctx context.Context, sessionID uint64) (CaptureMeta, error) {
 	var meta CaptureMeta
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s WHERE capture_id = ? LIMIT 1",
+		"SELECT %s FROM %s WHERE session_id = ? LIMIT 1",
 		strings.Join(meta.ScanColumns(), ", "), c.capturesTable(),
 	)
-	if err := meta.ScanRow(c.conn.QueryRow(ctx, query, captureID)); err != nil {
+	if err := meta.ScanRow(c.conn.QueryRow(ctx, query, sessionID)); err != nil {
 		return CaptureMeta{}, fmt.Errorf("fetch capture meta: %w", err)
 	}
 	return meta, nil

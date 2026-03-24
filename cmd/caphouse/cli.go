@@ -17,7 +17,6 @@ import (
 	"caphouse"
 	"caphouse/query"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
@@ -294,19 +293,18 @@ func runExplain(cmd *cobra.Command, cfg config) error {
 	defer client.Close()
 
 	var sql string
-	if cfg.capture == "all" {
-		// nil captureIDs → no capture_id IN (...) filter; queries all captures.
-		var err error
-		sql, err = client.GenerateSQLForCaptures(nil, q, cfg.components)
+	if cfg.capture == "all" || cfg.capture == "" {
+		// nil sessionIDs → no session_id IN (...) filter; queries all sessions.
+		sql, err = client.GenerateSQLForSessions(nil, q, cfg.components)
 		if err != nil {
 			return err
 		}
 	} else {
-		captureID, _, err := parseCaptureID(cfg.capture, false)
+		sessionID, err := parseSessionID(cfg.capture)
 		if err != nil {
-			return fmt.Errorf("--capture is required for --query: %w", err)
+			return fmt.Errorf("--capture: %w", err)
 		}
-		sql, err = client.GenerateSQL(captureID, q, cfg.components)
+		sql, err = client.GenerateSQL(sessionID, q, cfg.components)
 		if err != nil {
 			return err
 		}
@@ -345,7 +343,6 @@ func runRead(cmd *cobra.Command, cfg config) error {
 			logger.Warn("no input files specified and stdin is a terminal; nothing to ingest")
 			return nil
 		}
-		// Stdin is a pipe or redirect — ingest it as a single unnamed stream.
 		cfg.filePaths = []string{"-"}
 	}
 
@@ -354,25 +351,8 @@ func runRead(cmd *cobra.Command, cfg config) error {
 		return err
 	}
 
-	// Determine whether the user supplied an explicit capture UUID.
-	explicitCapture := cfg.capture != "" && cfg.capture != "new"
-	var sharedCaptureID uuid.UUID
-	if explicitCapture {
-		sharedCaptureID, _, err = parseCaptureID(cfg.capture, false)
-		if err != nil {
-			return err
-		}
-	}
-
 	for _, filePath := range files {
-		var captureID uuid.UUID
-		isNew := true
-		if explicitCapture {
-			captureID = sharedCaptureID
-			isNew = false
-		}
-
-		if err := ingestOneFile(ctx, cmd, cfg, logger, client, filePath, captureID, isNew); err != nil {
+		if err := ingestOneFile(ctx, cmd, cfg, logger, client, filePath); err != nil {
 			if len(files) > 1 {
 				return fmt.Errorf("%s: %w", filePath, err)
 			}
@@ -383,8 +363,8 @@ func runRead(cmd *cobra.Command, cfg config) error {
 }
 
 // ingestOneFile ingests a single PCAP file (or stdin when filePath is "" or "-").
-func ingestOneFile(ctx context.Context, cmd *cobra.Command, cfg config, logger *slog.Logger, client *caphouse.Client, filePath string, captureID uuid.UUID, isNew bool) error {
-	src, fileSize, captureID, packetIDBase, err := openSource(filePath, captureID, isNew, logger)
+func ingestOneFile(ctx context.Context, cmd *cobra.Command, cfg config, logger *slog.Logger, client *caphouse.Client, filePath string) error {
+	src, fileSize, sessionID, err := openSource(filePath, logger)
 	if err != nil {
 		return err
 	}
@@ -404,7 +384,7 @@ func ingestOneFile(ctx context.Context, cmd *cobra.Command, cfg config, logger *
 	start := time.Now()
 	stopBar := startProgressBar(fileSize, -1, &p, start, cfg.silent)
 
-	id, err := client.IngestPCAPStream(ctx, cr, captureID, cfg.sensor, packetIDBase, func() { p.packets.Add(1) })
+	id, err := client.IngestPCAPStream(ctx, cr, sessionID, cfg.sensor, func() { p.packets.Add(1) })
 	stopBar()
 
 	if err != nil {
@@ -412,15 +392,13 @@ func ingestOneFile(ctx context.Context, cmd *cobra.Command, cfg config, logger *
 	}
 
 	logger.Info("done",
-		"capture_id", id,
+		"session_id", id,
 		"packets", p.packets.Load(),
 		"bytes", p.bytesRead.Load(),
 		"elapsed", time.Since(start).Truncate(time.Millisecond),
 	)
 
-	if isNew {
-		fmt.Fprintf(cmd.OutOrStdout(), "capture_id=%s\n", id)
-	}
+	fmt.Fprintf(cmd.OutOrStdout(), "session_id=%d\n", id)
 	return nil
 }
 
@@ -456,7 +434,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 		return writeOutput(cmd, cfg, rc, "all", totalPackets, &p, logger)
 	}
 
-	captureID, _, err := parseCaptureID(cfg.capture, false)
+	sessionID, err := parseSessionID(cfg.capture)
 	if err != nil {
 		return err
 	}
@@ -476,25 +454,25 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("parse filter: %w", err)
 		}
-		rc, totalPackets, err = client.ExportCaptureFiltered(ctx, captureID, f, &p.packets)
+		rc, totalPackets, err = client.ExportCaptureFiltered(ctx, sessionID, f, &p.packets)
 		if err != nil {
 			return err
 		}
-		logger.Info("exporting filtered", "capture_id", captureID, "filter", cfg.queryExpr, "matched", totalPackets)
+		logger.Info("exporting filtered", "session_id", sessionID, "filter", cfg.queryExpr, "matched", totalPackets)
 	} else {
-		totalPackets, err = client.CountPackets(ctx, captureID)
+		totalPackets, err = client.CountPackets(ctx, sessionID)
 		if err != nil {
 			logger.Warn("could not count packets", "err", err)
 			totalPackets = -1
 		}
-		rc, err = client.ExportCaptureWithProgress(ctx, captureID, &p.packets)
+		rc, err = client.ExportCaptureWithProgress(ctx, sessionID, &p.packets)
 		if err != nil {
 			return err
 		}
-		logger.Info("exporting", "capture_id", captureID)
+		logger.Info("exporting", "session_id", sessionID)
 	}
 	defer rc.Close()
-	return writeOutput(cmd, cfg, rc, captureID.String(), totalPackets, &p, logger)
+	return writeOutput(cmd, cfg, rc, fmt.Sprintf("%d", sessionID), totalPackets, &p, logger)
 }
 
 // writeOutput streams rc to the configured output destination, showing a
@@ -544,16 +522,16 @@ func writeOutput(cmd *cobra.Command, cfg config, rc io.ReadCloser, label string,
 }
 
 // openSource opens the PCAP source (file or stdin). For files it computes a
-// SHA-256 of the basename and contents to derive a stable capture ID (when
-// isNew) and a deterministic packetIDBase. Stdin always returns packetIDBase=0.
-func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.Logger) (io.Reader, int64, uuid.UUID, uint64, error) {
+// SHA-256 of the basename and contents to derive a deterministic session ID.
+// Stdin always returns sessionID=0.
+func openSource(filePath string, logger *slog.Logger) (io.Reader, int64, uint64, error) {
 	if filePath == "" || filePath == "-" {
-		return os.Stdin, -1, captureID, 0, nil
+		return os.Stdin, -1, 0, nil
 	}
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, 0, uuid.Nil, 0, fmt.Errorf("open pcap: %w", err)
+		return nil, 0, 0, fmt.Errorf("open pcap: %w", err)
 	}
 
 	var fileSize int64 = -1
@@ -565,22 +543,17 @@ func openSource(filePath string, captureID uuid.UUID, isNew bool, logger *slog.L
 	fmt.Fprintf(h, "%s\x00", filepath.Base(filePath))
 	if _, err := io.Copy(h, f); err != nil {
 		f.Close()
-		return nil, 0, uuid.Nil, 0, fmt.Errorf("hash pcap: %w", err)
+		return nil, 0, 0, fmt.Errorf("hash pcap: %w", err)
 	}
 	sum := h.Sum(nil)
-
-	if isNew {
-		captureID = uuid.NewSHA1(capHouseNamespace, sum)
-		logger.Debug("stable capture_id derived", "source", filePath, "capture_id", captureID)
-	}
-
-	packetIDBase := sumToPacketIDBase(sum)
+	sessionID := sumToSessionID(sum)
+	logger.Debug("session_id derived", "source", filePath, "session_id", sessionID)
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		f.Close()
-		return nil, 0, uuid.Nil, 0, fmt.Errorf("seek pcap: %w", err)
+		return nil, 0, 0, fmt.Errorf("seek pcap: %w", err)
 	}
 
-	return f, fileSize, captureID, packetIDBase, nil
+	return f, fileSize, sessionID, nil
 }
 

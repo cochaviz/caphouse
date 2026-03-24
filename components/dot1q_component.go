@@ -7,7 +7,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed dot1q_schema.sql
@@ -15,8 +14,9 @@ var dot1qSchemaSQL string
 
 // Dot1QComponent stores one vlan tag (repeatable).
 type Dot1QComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 	TagIndex     uint16    `ch:"tag_index"`
 	Priority     uint8     `ch:"priority"`
@@ -42,7 +42,8 @@ func (c *Dot1QComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *Dot1QComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -65,8 +66,8 @@ func (c *Dot1QComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *Dot1QComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
-	c.CaptureID = captureID
+func (c *Dot1QComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
+	c.SessionID = sessionID
 	err := rows.Scan(&c.PacketID, &c.TagIndex, &c.Priority, &c.DropEligible, &c.VLANID, &c.EtherType)
 	return c.PacketID, err
 }

@@ -14,38 +14,35 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
-// CountPackets returns the deduplicated number of packets stored for the given capture.
-func (c *Client) CountPackets(ctx context.Context, captureID uuid.UUID) (int64, error) {
-	query := fmt.Sprintf("SELECT count() FROM %s FINAL WHERE capture_id = ?", c.packetsTable())
+// CountPackets returns the deduplicated number of packets stored for the given session.
+func (c *Client) CountPackets(ctx context.Context, sessionID uint64) (int64, error) {
+	q := fmt.Sprintf("SELECT count() FROM %s FINAL WHERE session_id = ?", c.packetsTable())
 	var n uint64
-	if err := c.conn.QueryRow(ctx, query, captureID).Scan(&n); err != nil {
+	if err := c.conn.QueryRow(ctx, q, sessionID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count packets: %w", err)
 	}
 	return int64(n), nil
 }
 
-// ExportCapture returns a reader that streams the complete capture as a classic
-// PCAP file. The caller must close the returned reader. For progress tracking
-// use ExportCaptureWithProgress.
-func (c *Client) ExportCapture(ctx context.Context, captureID uuid.UUID) (io.ReadCloser, error) {
-	return c.ExportCaptureWithProgress(ctx, captureID, nil)
+// ExportCapture returns a reader that streams the complete session as a classic
+// PCAP file. The caller must close the returned reader.
+func (c *Client) ExportCapture(ctx context.Context, sessionID uint64) (io.ReadCloser, error) {
+	return c.ExportCaptureWithProgress(ctx, sessionID, nil)
 }
 
 // ExportCaptureWithProgress is like ExportCapture but increments packetsWritten
 // after each packet is written to the stream. packetsWritten may be nil.
-func (c *Client) ExportCaptureWithProgress(ctx context.Context, captureID uuid.UUID, packetsWritten *atomic.Int64) (io.ReadCloser, error) {
-	meta, err := c.fetchCaptureMeta(ctx, captureID)
+func (c *Client) ExportCaptureWithProgress(ctx context.Context, sessionID uint64, packetsWritten *atomic.Int64) (io.ReadCloser, error) {
+	meta, err := c.fetchCaptureMeta(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
 	pr, pw := io.Pipe()
 	go func() {
-		if err := c.streamCapture(ctx, meta, captureID, nil, pw, packetsWritten); err != nil {
+		if err := c.streamCapture(ctx, meta, sessionID, nil, pw, packetsWritten); err != nil {
 			_ = pw.CloseWithError(err)
 			return
 		}
@@ -54,25 +51,24 @@ func (c *Client) ExportCaptureWithProgress(ctx context.Context, captureID uuid.U
 	return pr, nil
 }
 
-// ExportCaptureBytes reads the entire capture into memory.
-func (c *Client) ExportCaptureBytes(ctx context.Context, captureID uuid.UUID) ([]byte, error) {
-	rc, err := c.ExportCapture(ctx, captureID)
+// ExportCaptureBytes reads the entire session into memory.
+func (c *Client) ExportCaptureBytes(ctx context.Context, sessionID uint64) ([]byte, error) {
+	rc, err := c.ExportCapture(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-
 	return io.ReadAll(rc)
 }
 
 // streamCapture writes a PCAP stream to w. If ranges is nil, all packets for
-// the capture are streamed. If non-nil, only packets whose IDs fall within the
+// the session are streamed. If non-nil, only packets whose IDs fall within the
 // given ranges are included; ranges must be pre-computed via toRanges.
-func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID uuid.UUID, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
+func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, sessionID uint64, ranges []idRange, w io.Writer, packetsWritten *atomic.Int64) error {
 	buf := bufio.NewWriterSize(w, 128*1024)
 	if len(meta.GlobalHeaderRaw) != 24 {
-		c.log.Warn("exporting capture with synthetic PCAP header: original was pcapng or header was not preserved; output may differ from source",
-			"capture_id", captureID)
+		c.log.Warn("exporting session with synthetic PCAP header: original was pcapng or header was not preserved; output may differ from source",
+			"session_id", sessionID)
 	}
 	if err := writePCAPHeader(buf, meta); err != nil {
 		return err
@@ -82,8 +78,8 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 	}
 
 	type nucleusRow struct {
-		packetID      uint64
-		tsOffsetNs    uint64
+		packetID      uint32
+		tsNs          int64
 		incl          uint32
 		truncExtra    uint32
 		componentMask *big.Int
@@ -98,18 +94,18 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 		if len(batch) == 0 {
 			return nil
 		}
-		ids := make([]uint64, len(batch))
+		ids := make([]uint32, len(batch))
 		for i, row := range batch {
 			ids[i] = row.packetID
 		}
-		all, err := c.fetchComponentsForBatch(ctx, captureID, ids)
+		all, err := c.fetchComponentsForBatch(ctx, sessionID, ids)
 		if err != nil {
 			return err
 		}
 		for _, row := range batch {
-			ts := meta.CreatedAt.Add(time.Duration(row.tsOffsetNs))
+			ts := time.Unix(0, row.tsNs)
 			nucleus := components.PacketNucleus{
-				CaptureID:  captureID,
+				SessionID:  sessionID,
 				PacketID:   row.packetID,
 				Timestamp:  ts,
 				InclLen:    row.incl,
@@ -124,7 +120,7 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 			}
 			frame, err := reconstructFrame(nucleus, componentList)
 			if err != nil {
-				c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
+				c.debugPacketDump(sessionID, row.packetID, nucleus, componentList)
 				return fmt.Errorf("reconstruct packet %d: %w", row.packetID, err)
 			}
 			if err := writePacketRecord(buf, order, meta.TimeResolution, ts, row.incl, row.incl+row.truncExtra, frame); err != nil {
@@ -140,9 +136,9 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 	const selectCols = "SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash"
 
 	if ranges == nil {
-		// Stream all packets for the capture.
-		query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? ORDER BY packet_id ASC", selectCols, c.packetsTable())
-		rows, err := c.conn.Query(ctx, query, captureID)
+		// Stream all packets for the session.
+		q := fmt.Sprintf("%s FROM %s FINAL WHERE session_id = ? ORDER BY packet_id ASC", selectCols, c.packetsTable())
+		rows, err := c.conn.Query(ctx, q, sessionID)
 		if err != nil {
 			return fmt.Errorf("query packets: %w", err)
 		}
@@ -153,7 +149,7 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 			componentMask := new(big.Int)
 			var row nucleusRow
 			row.componentMask = componentMask
-			if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+			if err := rows.Scan(&row.packetID, &row.tsNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
 				return fmt.Errorf("scan packet: %w", err)
 			}
 			batch = append(batch, row)
@@ -175,10 +171,10 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 		for start := 0; start < len(ranges); start += maxRangesPerQuery {
 			end := min(start+maxRangesPerQuery, len(ranges))
 			chunk := ranges[start:end]
-			whereClause, whereArgs := rangeArgs(captureID, chunk)
-			query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY packet_id ASC",
+			whereClause, whereArgs := rangeArgs(sessionID, chunk)
+			q := fmt.Sprintf("%s FROM %s FINAL WHERE session_id = ? AND %s ORDER BY packet_id ASC",
 				selectCols, c.packetsTable(), whereClause)
-			rows, err := c.conn.Query(ctx, query, whereArgs...)
+			rows, err := c.conn.Query(ctx, q, whereArgs...)
 			if err != nil {
 				return fmt.Errorf("query filtered packets: %w", err)
 			}
@@ -187,7 +183,7 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 				componentMask := new(big.Int)
 				var row nucleusRow
 				row.componentMask = componentMask
-				if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+				if err := rows.Scan(&row.packetID, &row.tsNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
 					rows.Close()
 					return fmt.Errorf("scan filtered packet: %w", err)
 				}
@@ -210,15 +206,14 @@ func (c *Client) streamCapture(ctx context.Context, meta CaptureMeta, captureID 
 	return nil
 }
 
-type idRange struct{ lo, hi uint64 }
+type idRange struct{ lo, hi uint32 }
 
 // toRanges compresses packet IDs into the minimal set of contiguous ranges.
-// For sequential ingests (IDs 0,1,2,...) the whole batch becomes one range.
-func toRanges(ids []uint64) []idRange {
+func toRanges(ids []uint32) []idRange {
 	if len(ids) == 0 {
 		return nil
 	}
-	sorted := make([]uint64, len(ids))
+	sorted := make([]uint32, len(ids))
 	copy(sorted, ids)
 	slices.Sort(sorted)
 
@@ -234,11 +229,11 @@ func toRanges(ids []uint64) []idRange {
 }
 
 // rangeArgs returns the WHERE clause fragment and args for a set of id ranges.
-// args[0] is captureID; subsequent pairs are (lo, hi) per range.
-func rangeArgs(captureID uuid.UUID, ranges []idRange) (string, []any) {
+// args[0] is sessionID; subsequent pairs are (lo, hi) per range.
+func rangeArgs(sessionID uint64, ranges []idRange) (string, []any) {
 	var b strings.Builder
 	args := make([]any, 1+2*len(ranges))
-	args[0] = captureID
+	args[0] = sessionID
 	b.WriteByte('(')
 	for i, r := range ranges {
 		if i > 0 {
@@ -257,10 +252,10 @@ func rangeArgs(captureID uuid.UUID, ranges []idRange) (string, []any) {
 const maxRangesPerQuery = 1000
 
 func (c *Client) fetchComponentBatch(
-	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
+	ctx context.Context, sessionID uint64, packetIDs []uint32,
 	ctor func() components.Component,
-) (map[uint64][]components.Component, error) {
-	m := make(map[uint64][]components.Component)
+) (map[uint32][]components.Component, error) {
+	m := make(map[uint32][]components.Component)
 	ranges := toRanges(packetIDs)
 	for len(ranges) > 0 {
 		chunk := ranges
@@ -270,23 +265,23 @@ func (c *Client) fetchComponentBatch(
 		ranges = ranges[len(chunk):]
 
 		proto := ctor()
-		whereClause, args := rangeArgs(captureID, chunk)
+		whereClause, args := rangeArgs(sessionID, chunk)
 		scanCols, err := proto.DataColumns("")
 		if err != nil {
 			return nil, fmt.Errorf("data columns for %s: %w", proto.Table(), err)
 		}
-		query := fmt.Sprintf(
-			"SELECT %s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY %s ASC",
+		q := fmt.Sprintf(
+			"SELECT %s FROM %s FINAL WHERE session_id = ? AND %s ORDER BY %s ASC",
 			strings.Join(scanCols, ", "),
 			c.tableRef(proto.Table()), whereClause, proto.FetchOrderBy(),
 		)
-		rows, err := c.conn.Query(ctx, query, args...)
+		rows, err := c.conn.Query(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("fetch %s: %w", proto.Table(), err)
 		}
 		for rows.Next() {
 			item := ctor()
-			pid, err := item.ScanRow(captureID, rows)
+			pid, err := item.ScanRow(sessionID, rows)
 			if err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scan %s: %w", proto.Table(), err)
@@ -304,22 +299,22 @@ func (c *Client) fetchComponentBatch(
 
 type fetchResult struct {
 	kind uint
-	rows map[uint64][]components.Component
+	rows map[uint32][]components.Component
 	err  error
 }
 
 func (c *Client) fetchComponentsForBatch(
-	ctx context.Context, captureID uuid.UUID, packetIDs []uint64,
-) (map[uint]map[uint64][]components.Component, error) {
+	ctx context.Context, sessionID uint64, packetIDs []uint32,
+) (map[uint]map[uint32][]components.Component, error) {
 	n := len(components.ComponentFactories)
 	results := make(chan fetchResult, n)
 	for kind, ctor := range components.ComponentFactories {
 		go func() {
-			rows, err := c.fetchComponentBatch(ctx, captureID, packetIDs, ctor)
+			rows, err := c.fetchComponentBatch(ctx, sessionID, packetIDs, ctor)
 			results <- fetchResult{kind, rows, err}
 		}()
 	}
-	all := make(map[uint]map[uint64][]components.Component, n)
+	all := make(map[uint]map[uint32][]components.Component, n)
 	for range n {
 		r := <-results
 		if r.err != nil {
@@ -333,7 +328,7 @@ func (c *Client) fetchComponentsForBatch(
 // resolveComponents builds the component list for one packet from a pre-fetched batch map.
 func resolveComponents(
 	nucleus components.PacketNucleus,
-	all map[uint]map[uint64][]components.Component,
+	all map[uint]map[uint32][]components.Component,
 ) ([]components.Component, error) {
 	var list []components.Component
 	for _, kind := range components.KnownComponentKinds {
@@ -342,16 +337,16 @@ func resolveComponents(
 		}
 		rows := all[kind][nucleus.PacketID]
 		if len(rows) == 0 {
-			return nil, fmt.Errorf("missing component %d for %s/%d", kind, nucleus.CaptureID, nucleus.PacketID)
+			return nil, fmt.Errorf("missing component %d for session %d/%d", kind, nucleus.SessionID, nucleus.PacketID)
 		}
 		list = append(list, rows...)
 	}
 	return list, nil
 }
 
-func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus components.PacketNucleus, comps []components.Component) {
+func (c *Client) debugPacketDump(sessionID uint64, packetID uint32, nucleus components.PacketNucleus, comps []components.Component) {
 	c.log.Debug("packet reconstruction failed",
-		"capture_id", captureID,
+		"session_id", sessionID,
 		"packet_id", packetID,
 		"incl_len", nucleus.InclLen,
 		"orig_len", nucleus.OrigLen,
@@ -389,41 +384,28 @@ func (c *Client) debugPacketDump(captureID uuid.UUID, packetID uint64, nucleus c
 	}
 }
 
-// timedPacketRef is a packet reference augmented with absolute-time sort keys
-// for merging across captures.
+// timedPacketRef is a packet reference augmented with its absolute timestamp.
 type timedPacketRef struct {
-	captureID        uuid.UUID
-	packetID         uint64
-	absNs            int64
-	captureCreatedAt time.Time
+	sessionID uint64
+	packetID  uint32
+	absNs     int64
 }
 
-// fetchSortedPacketRefs queries packets whose absolute timestamp falls in
-// [from, to] (Unix nanoseconds), returning them sorted by
-// (absNs ASC, captureCreatedAt ASC, captureID ASC, packetID ASC).
-// When captureIDs is nil or empty, all captures are searched.
-func (c *Client) fetchSortedPacketRefs(ctx context.Context, captureIDs []uuid.UUID, from, to int64) ([]timedPacketRef, error) {
-	capScope := query.CaptureScope(captureIDs)
-	// PREWHERE created_at <= to prunes captures that started after the query
-	// window. We cannot apply a lower-bound prewhere because a capture that
-	// started before `from` can still have packets inside [from, to].
-	query := fmt.Sprintf(`
-		SELECT capture_id, packet_id, abs_ns, capture_created_at
-		FROM (
-			SELECT p.capture_id, p.packet_id,
-			       toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) AS abs_ns,
-			       cap.created_at AS capture_created_at
-			FROM %s p FINAL
-			INNER JOIN (
-				SELECT capture_id, created_at FROM %s FINAL %s
-				PREWHERE toInt64(toUnixTimestamp64Nano(created_at)) <= ?
-			) cap ON p.capture_id = cap.capture_id
-		)
-		WHERE abs_ns BETWEEN ? AND ?
-		ORDER BY abs_ns ASC, capture_created_at ASC, capture_id ASC, packet_id ASC`,
-		c.packetsTable(), c.capturesTable(), capScope,
+// fetchSortedPacketRefs queries packets whose timestamp falls in [from, to]
+// (Unix nanoseconds), returning them sorted by (ts ASC, sessionID ASC, packetID ASC).
+// When sessionIDs is nil or empty, all sessions are searched.
+func (c *Client) fetchSortedPacketRefs(ctx context.Context, sessionIDs []uint64, from, to int64) ([]timedPacketRef, error) {
+	var whereExtra string
+	if len(sessionIDs) > 0 {
+		whereExtra = " AND " + query.SessionInSQL(sessionIDs)
+	}
+	q := fmt.Sprintf(
+		`SELECT session_id, packet_id, ts FROM %s FINAL
+		 WHERE ts BETWEEN ? AND ?%s
+		 ORDER BY ts ASC, session_id ASC, packet_id ASC`,
+		c.packetsTable(), whereExtra,
 	)
-	rows, err := c.conn.Query(ctx, query, to, from, to)
+	rows, err := c.conn.Query(ctx, q, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("fetch sorted packet refs: %w", err)
 	}
@@ -431,7 +413,7 @@ func (c *Client) fetchSortedPacketRefs(ctx context.Context, captureIDs []uuid.UU
 	var refs []timedPacketRef
 	for rows.Next() {
 		var r timedPacketRef
-		if err := rows.Scan(&r.captureID, &r.packetID, &r.absNs, &r.captureCreatedAt); err != nil {
+		if err := rows.Scan(&r.sessionID, &r.packetID, &r.absNs); err != nil {
 			return nil, fmt.Errorf("scan timed packet ref: %w", err)
 		}
 		refs = append(refs, r)
@@ -448,17 +430,16 @@ type reconstructedPkt struct {
 }
 
 // fetchReconstructedPackets fetches nucleus data and all components for the
-// given packet IDs in captureID, then returns reconstructed packets keyed by
-// packetID.
-func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.UUID, meta CaptureMeta, packetIDs []uint64) (map[uint64]reconstructedPkt, error) {
+// given packet IDs in sessionID, then returns reconstructed packets keyed by packetID.
+func (c *Client) fetchReconstructedPackets(ctx context.Context, sessionID uint64, packetIDs []uint32) (map[uint32]reconstructedPkt, error) {
 	if len(packetIDs) == 0 {
 		return nil, nil
 	}
 	ranges := toRanges(packetIDs)
 	const selectCols = "SELECT packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash"
 	type nucleusRow struct {
-		packetID      uint64
-		tsOffsetNs    uint64
+		packetID      uint32
+		tsNs          int64
 		incl          uint32
 		truncExtra    uint32
 		componentMask *big.Int
@@ -469,18 +450,18 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 	for start := 0; start < len(ranges); start += maxRangesPerQuery {
 		end := min(start+maxRangesPerQuery, len(ranges))
 		chunk := ranges[start:end]
-		whereClause, whereArgs := rangeArgs(captureID, chunk)
-		query := fmt.Sprintf("%s FROM %s FINAL WHERE capture_id = ? AND %s ORDER BY packet_id ASC",
+		whereClause, whereArgs := rangeArgs(sessionID, chunk)
+		q := fmt.Sprintf("%s FROM %s FINAL WHERE session_id = ? AND %s ORDER BY packet_id ASC",
 			selectCols, c.packetsTable(), whereClause)
-		rows, err := c.conn.Query(ctx, query, whereArgs...)
+		rows, err := c.conn.Query(ctx, q, whereArgs...)
 		if err != nil {
-			return nil, fmt.Errorf("fetch nuclei for capture %s: %w", captureID, err)
+			return nil, fmt.Errorf("fetch nuclei for session %d: %w", sessionID, err)
 		}
 		for rows.Next() {
 			componentMask := new(big.Int)
 			var row nucleusRow
 			row.componentMask = componentMask
-			if err := rows.Scan(&row.packetID, &row.tsOffsetNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
+			if err := rows.Scan(&row.packetID, &row.tsNs, &row.incl, &row.truncExtra, componentMask, &row.frameRaw, &row.frameHash); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scan nucleus: %w", err)
 			}
@@ -493,16 +474,16 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 		}
 	}
 
-	all, err := c.fetchComponentsForBatch(ctx, captureID, packetIDs)
+	all, err := c.fetchComponentsForBatch(ctx, sessionID, packetIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[uint64]reconstructedPkt, len(nuclei))
+	result := make(map[uint32]reconstructedPkt, len(nuclei))
 	for _, row := range nuclei {
-		ts := meta.CreatedAt.Add(time.Duration(row.tsOffsetNs))
+		ts := time.Unix(0, row.tsNs)
 		nucleus := components.PacketNucleus{
-			CaptureID:  captureID,
+			SessionID:  sessionID,
 			PacketID:   row.packetID,
 			Timestamp:  ts,
 			InclLen:    row.incl,
@@ -517,8 +498,8 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 		}
 		frame, err := reconstructFrame(nucleus, componentList)
 		if err != nil {
-			c.debugPacketDump(captureID, row.packetID, nucleus, componentList)
-			return nil, fmt.Errorf("reconstruct packet %d in capture %s: %w", row.packetID, captureID, err)
+			c.debugPacketDump(sessionID, row.packetID, nucleus, componentList)
+			return nil, fmt.Errorf("reconstruct packet %d in session %d: %w", row.packetID, sessionID, err)
 		}
 		result[row.packetID] = reconstructedPkt{
 			ts:    ts,
@@ -530,47 +511,41 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, captureID uuid.U
 	return result, nil
 }
 
-// ExportAllCapturesFiltered finds all captures with packets in the given time
+// ExportAllCapturesFiltered finds all sessions with packets in the given time
 // window and exports them as a single merged PCAP file sorted by absolute
-// packet time. Ties are broken by capture start time, then by capture ID.
+// packet time. Ties are broken by session ID, then by packet ID.
 // f is an optional query filter; an empty f.Clause selects all packets.
 //
 // packetsWritten is incremented after each packet (may be nil).
 func (c *Client) ExportAllCapturesFiltered(ctx context.Context, from, to time.Time, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
-	// Query across all captures — no capture ID pre-filter.
 	refs, err := c.fetchSortedPacketRefs(ctx, nil, from.UnixNano(), to.UnixNano())
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// If a WHERE clause filter is set, intersect with its matching packet IDs.
-	// QueryPackets applies the full query (INNER JOINs on component tables etc.)
-	// and returns only matching (captureID, packetID) pairs. We then keep only
-	// the time-sorted refs that appear in that set.
 	if f.Clause != "" {
 		filterRefs, err := c.QueryPackets(ctx, nil, f)
 		if err != nil {
 			return nil, 0, fmt.Errorf("export filter: %w", err)
 		}
 		type key struct {
-			captureID uuid.UUID
-			packetID  uint64
+			sessionID uint64
+			packetID  uint32
 		}
 		allowed := make(map[key]struct{}, len(filterRefs))
 		for _, r := range filterRefs {
-			allowed[key{r.CaptureID, r.PacketID}] = struct{}{}
+			allowed[key{r.SessionID, r.PacketID}] = struct{}{}
 		}
 		filtered := refs[:0]
 		for _, r := range refs {
-			if _, ok := allowed[key{r.captureID, r.packetID}]; ok {
+			if _, ok := allowed[key{r.sessionID, r.packetID}]; ok {
 				filtered = append(filtered, r)
 			}
 		}
 		refs = filtered
 	}
 
-	// Build capture metadata map only for captures that have matching packets.
-	captureMap, err := c.fetchCaptureMetaMap(ctx, uniqueCaptureIDs(refs))
+	captureMap, err := c.fetchCaptureMetaMap(ctx, uniqueSessionIDs(refs))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -586,42 +561,42 @@ func (c *Client) ExportAllCapturesFiltered(ctx context.Context, from, to time.Ti
 	return pr, int64(len(refs)), nil
 }
 
-// uniqueCaptureIDs returns the deduplicated set of capture IDs referenced by refs.
-func uniqueCaptureIDs(refs []timedPacketRef) []uuid.UUID {
-	seen := make(map[uuid.UUID]bool, len(refs))
-	var out []uuid.UUID
+// uniqueSessionIDs returns the deduplicated set of session IDs referenced by refs.
+func uniqueSessionIDs(refs []timedPacketRef) []uint64 {
+	seen := make(map[uint64]bool, len(refs))
+	var out []uint64
 	for _, r := range refs {
-		if !seen[r.captureID] {
-			seen[r.captureID] = true
-			out = append(out, r.captureID)
+		if !seen[r.sessionID] {
+			seen[r.sessionID] = true
+			out = append(out, r.sessionID)
 		}
 	}
 	return out
 }
 
-// fetchCaptureMetaMap fetches CaptureMeta for each of the given capture IDs
-// and returns them as a map keyed by capture ID.
-func (c *Client) fetchCaptureMetaMap(ctx context.Context, captureIDs []uuid.UUID) (map[uuid.UUID]CaptureMeta, error) {
-	if len(captureIDs) == 0 {
+// fetchCaptureMetaMap fetches CaptureMeta for each of the given session IDs
+// and returns them as a map keyed by session ID.
+func (c *Client) fetchCaptureMetaMap(ctx context.Context, sessionIDs []uint64) (map[uint64]CaptureMeta, error) {
+	if len(sessionIDs) == 0 {
 		return nil, nil
 	}
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
-	query := fmt.Sprintf(
+	q := fmt.Sprintf(
 		"SELECT %s FROM %s FINAL WHERE %s",
-		cols, c.capturesTable(), query.CaptureInSQL(captureIDs),
+		cols, c.capturesTable(), query.SessionInSQL(sessionIDs),
 	)
-	rows, err := c.conn.Query(ctx, query)
+	rows, err := c.conn.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("fetch capture meta map: %w", err)
 	}
 	defer rows.Close()
-	result := make(map[uuid.UUID]CaptureMeta, len(captureIDs))
+	result := make(map[uint64]CaptureMeta, len(sessionIDs))
 	for rows.Next() {
 		m, err := scanCaptureMeta(rows.Scan)
 		if err != nil {
 			return nil, fmt.Errorf("scan capture meta: %w", err)
 		}
-		result[m.CaptureID] = m
+		result[m.SessionID] = m
 	}
 	return result, rows.Err()
 }
@@ -631,17 +606,16 @@ func (c *Client) fetchCaptureMetaMap(ctx context.Context, captureIDs []uuid.UUID
 func (c *Client) streamMergedCaptures(
 	ctx context.Context,
 	refs []timedPacketRef,
-	captureMap map[uuid.UUID]CaptureMeta,
+	captureMap map[uint64]CaptureMeta,
 	w io.Writer,
 	packetsWritten *atomic.Int64,
 ) error {
-	// Determine link type and snaplen from the captures present in refs.
 	var linkType, snaplen uint32
-	linkType = 1    // Ethernet default
-	snaplen = 65535 // default
+	linkType = 1
+	snaplen = 65535
 	seenLinkTypes := map[uint32]bool{}
 	for _, ref := range refs {
-		if m, ok := captureMap[ref.captureID]; ok {
+		if m, ok := captureMap[ref.sessionID]; ok {
 			seenLinkTypes[m.LinkType] = true
 			if m.Snaplen > snaplen {
 				snaplen = m.Snaplen
@@ -653,10 +627,9 @@ func (c *Client) streamMergedCaptures(
 			linkType = lt
 		}
 	} else if len(seenLinkTypes) > 1 {
-		c.log.Warn("merged export contains captures with different link types; using first encountered link type",
+		c.log.Warn("merged export contains sessions with different link types; using first encountered link type",
 			"link_types", seenLinkTypes)
-		// Use link type from the first ref's capture.
-		if m, ok := captureMap[refs[0].captureID]; ok {
+		if m, ok := captureMap[refs[0].sessionID]; ok {
 			linkType = m.LinkType
 		}
 	}
@@ -670,7 +643,7 @@ func (c *Client) streamMergedCaptures(
 
 	buf := bufio.NewWriterSize(w, 128*1024)
 	c.log.Warn("exporting merged capture with synthetic PCAP header",
-		"capture_count", len(captureMap),
+		"session_count", len(captureMap),
 		"packet_count", len(refs))
 	if err := writePCAPHeader(buf, syntheticMeta); err != nil {
 		return err
@@ -682,31 +655,27 @@ func (c *Client) streamMergedCaptures(
 
 	order := byteOrder(syntheticMeta.Endianness)
 
-	// Group packet IDs by captureID for batch fetching.
-	packetsByCapture := make(map[uuid.UUID][]uint64)
+	// Group packet IDs by sessionID for batch fetching.
+	packetsBySession := make(map[uint64][]uint32)
 	for _, ref := range refs {
-		packetsByCapture[ref.captureID] = append(packetsByCapture[ref.captureID], ref.packetID)
+		packetsBySession[ref.sessionID] = append(packetsBySession[ref.sessionID], ref.packetID)
 	}
 
-	// Fetch and reconstruct all packets for each capture.
-	allPackets := make(map[uuid.UUID]map[uint64]reconstructedPkt, len(packetsByCapture))
-	for captureID, ids := range packetsByCapture {
-		meta, ok := captureMap[captureID]
-		if !ok {
-			return fmt.Errorf("missing capture meta for %s", captureID)
-		}
-		pkts, err := c.fetchReconstructedPackets(ctx, captureID, meta, ids)
+	// Fetch and reconstruct all packets for each session.
+	allPackets := make(map[uint64]map[uint32]reconstructedPkt, len(packetsBySession))
+	for sessionID, ids := range packetsBySession {
+		pkts, err := c.fetchReconstructedPackets(ctx, sessionID, ids)
 		if err != nil {
 			return err
 		}
-		allPackets[captureID] = pkts
+		allPackets[sessionID] = pkts
 	}
 
 	// Write packets in the globally-sorted ref order.
 	for _, ref := range refs {
-		pkt, ok := allPackets[ref.captureID][ref.packetID]
+		pkt, ok := allPackets[ref.sessionID][ref.packetID]
 		if !ok {
-			return fmt.Errorf("packet %d from capture %s not reconstructed", ref.packetID, ref.captureID)
+			return fmt.Errorf("packet %d from session %d not reconstructed", ref.packetID, ref.sessionID)
 		}
 		if err := writePacketRecord(buf, order, syntheticMeta.TimeResolution, pkt.ts, pkt.incl, pkt.orig, pkt.frame); err != nil {
 			return err
@@ -732,7 +701,7 @@ func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
 	}
 	order := byteOrder(endian)
 	var header [24]byte
-	magic := uint32(0xA1B2C3D4) // µs magic; same value works for both LE and BE via order.PutUint32
+	magic := uint32(0xA1B2C3D4)
 	if meta.TimeResolution == "ns" {
 		magic = 0xA1B23C4D
 	}
@@ -748,8 +717,6 @@ func writePCAPHeader(w io.Writer, meta CaptureMeta) error {
 }
 
 // writePacketRecord writes a single classic PCAP packet record to w.
-// timeRes must be "us" (microsecond timestamps) or "ns" (nanosecond timestamps),
-// matching the magic number in the file's global header.
 func writePacketRecord(w io.Writer, order binary.ByteOrder, timeRes string, ts time.Time, incl uint32, orig uint32, frame []byte) error {
 	if incl != uint32(len(frame)) {
 		incl = uint32(len(frame))

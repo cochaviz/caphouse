@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -14,10 +16,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 	tccontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/clickhouse"
 )
@@ -177,28 +177,29 @@ func fmtBytes(b uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// ingestPCAP ingests pcapData into compressionClient under a fresh captureID
-// and returns that ID.
-func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) uuid.UUID {
+// ingestPCAP ingests pcapData into compressionClient and returns the session ID.
+func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) uint64 {
 	t.Helper()
 	meta, err := ParseGlobalHeader(pcapData[:24])
 	if err != nil {
 		t.Fatalf("parse global header: %v", err)
 	}
-	meta.CaptureID = uuid.New()
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00", "compression_test")
+	h.Write(pcapData)
+	sessionID := binary.BigEndian.Uint64(h.Sum(nil)[0:8])
+	meta.SessionID = sessionID
 	meta.SensorID = "test"
-	meta.CreatedAt = time.Now()
 	meta.GlobalHeaderRaw = pcapData[:24]
 
-	captureID, err := compressionClient.CreateCapture(ctx, meta)
-	if err != nil {
+	if _, err := compressionClient.CreateCapture(ctx, meta); err != nil {
 		t.Fatalf("create capture: %v", err)
 	}
 	reader, err := pcapgo.NewReader(bytes.NewReader(pcapData))
 	if err != nil {
 		t.Fatalf("pcapgo reader: %v", err)
 	}
-	var seq uint64
+	var seq uint32
 	for {
 		frame, ci, err := reader.ReadPacketData()
 		if errors.Is(err, io.EOF) {
@@ -208,7 +209,7 @@ func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) uuid.UUID {
 			t.Fatalf("read packet: %v", err)
 		}
 		if err := compressionClient.IngestPacket(ctx, meta.LinkType, Packet{
-			CaptureID: captureID,
+			SessionID: sessionID,
 			PacketID:  seq,
 			Timestamp: ci.Timestamp,
 			InclLen:   uint32(ci.CaptureLength),
@@ -222,7 +223,7 @@ func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) uuid.UUID {
 	if err := compressionClient.Flush(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	return captureID
+	return sessionID
 }
 
 // compressedSize returns the byte count after compressing data with xz -9
@@ -345,7 +346,7 @@ func TestParseRatio(t *testing.T) {
 			rows, err := compressionClient.conn.Query(ctx, `
 				SELECT count(), countIf(length(frame_raw) > 0)
 				FROM `+"`caphouse_compression`.`pcap_packets`"+` FINAL
-				WHERE capture_id = ?`, captureID)
+				WHERE session_id = ?`, captureID)
 			if err != nil {
 				t.Fatalf("query parse ratio: %v", err)
 			}

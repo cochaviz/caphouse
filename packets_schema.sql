@@ -1,9 +1,9 @@
 
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
-  capture_id  UUID,
-  packet_id   UInt64          CODEC(Delta,   LZ4),
-  ts          UInt64          CODEC(ZSTD(9)),
+  session_id  UInt64          CODEC(LZ4),
+  packet_id   UInt32          CODEC(Delta,   LZ4),
+  ts          Int64  CODEC(Delta, LZ4),
   incl_len    UInt32          CODEC(Delta,   LZ4),
   trunc_extra UInt32          CODEC(ZSTD(9)),
   components  UInt128,
@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   frame_hash  FixedString(32) CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (capture_id, packet_id)
+ORDER BY (ts, session_id, packet_id)

@@ -120,7 +120,7 @@ func TestHTTPSession(t *testing.T) {
 			if !ok {
 				t.Fatalf("HTTP protocol should implement SessionProtocol")
 			}
-			session := sp.NewSession(uuid.Nil, uuid.Nil)
+			session := sp.NewSession(uuid.Nil, 0)
 			for _, payload := range tt.payloads {
 				session.Feed([]byte(payload))
 			}

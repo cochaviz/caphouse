@@ -1,9 +1,8 @@
 
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
-  capture_id       UUID,
+  session_id       UInt64,
   sensor_id        LowCardinality(String),
-  created_at       DateTime64(9),
   endianness       Enum8('le' = 1, 'be' = 2),
   snaplen          UInt32,
   linktype         UInt32,
@@ -13,4 +12,4 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   codec_profile    LowCardinality(String)
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (sensor_id, created_at, capture_id)
+ORDER BY (session_id)

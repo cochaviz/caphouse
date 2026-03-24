@@ -7,7 +7,6 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/uuid"
 )
 
 //go:embed ntp_schema.sql
@@ -16,8 +15,9 @@ var ntpSchemaSQL string
 // NTPComponent stores parsed NTP header fields.
 // ntp_raw holds the full wire bytes for lossless reconstruction.
 type NTPComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 
 	LeapIndicator  uint8 `ch:"leap_indicator"`
@@ -52,7 +52,7 @@ func (c *NTPComponent) ClickhouseColumns() ([]string, error) {
 
 func (c *NTPComponent) ClickhouseValues() ([]any, error) {
 	return []any{
-		c.CaptureID, c.PacketID, c.CodecVersion,
+		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
 		c.LeapIndicator, c.Version, c.Mode, c.Stratum, c.Poll, c.Precision,
 		c.RootDelay, c.RootDispersion, c.ReferenceID,
 		c.ReferenceTS, c.OriginTS, c.ReceiveTS, c.TransmitTS,
@@ -61,7 +61,8 @@ func (c *NTPComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *NTPComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -78,9 +79,9 @@ func (c *NTPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *NTPComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *NTPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var raw string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(
 		&c.PacketID,
 		&c.LeapIndicator, &c.Version, &c.Mode, &c.Stratum, &c.Poll, &c.Precision,

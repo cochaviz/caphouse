@@ -6,7 +6,6 @@ import (
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
-	"github.com/google/uuid"
 )
 
 //go:embed ipv6_ext_schema.sql
@@ -14,8 +13,9 @@ var ipv6ExtSchemaSQL string
 
 // IPv6ExtComponent stores one raw IPv6 extension header (repeatable).
 type IPv6ExtComponent struct {
-	CaptureID    uuid.UUID `ch:"capture_id"`
-	PacketID     uint64    `ch:"packet_id"`
+	SessionID    uint64    `ch:"session_id"`
+	Ts           int64     `ch:"ts"`
+	PacketID  uint32 `ch:"packet_id"`
 	CodecVersion uint16    `ch:"codec_version"`
 	ExtIndex     uint16    `ch:"ext_index"`
 	ExtType      uint16    `ch:"ext_type"`
@@ -45,7 +45,8 @@ func (c *IPv6ExtComponent) ClickhouseValues() ([]any, error) {
 }
 
 func (c *IPv6ExtComponent) ApplyNucleus(nucleus PacketNucleus) {
-	c.CaptureID = nucleus.CaptureID
+	c.SessionID = nucleus.SessionID
+	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -68,9 +69,9 @@ func (c *IPv6ExtComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *IPv6ExtComponent) ScanRow(captureID uuid.UUID, rows chdriver.Rows) (uint64, error) {
+func (c *IPv6ExtComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
 	var raw string
-	c.CaptureID = captureID
+	c.SessionID = sessionID
 	err := rows.Scan(&c.PacketID, &c.ExtIndex, &c.ExtType, &raw)
 	c.ExtRaw = []byte(raw)
 	return c.PacketID, err

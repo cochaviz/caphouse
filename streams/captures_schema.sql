@@ -1,7 +1,7 @@
 
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
-  capture_id      UUID,
+  session_id      UInt64,
   stream_id       UUID,
   l7_proto        LowCardinality(String),
   proto           UInt8,
@@ -10,10 +10,10 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   src_port        UInt16,
   dst_port        UInt16,
   is_complete     Bool,
-  first_packet_id UInt64,
-  last_packet_id  UInt64,
+  first_packet_id UInt32,
+  last_packet_id  UInt32,
   packet_count    UInt64,
   byte_count      UInt64
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (capture_id, stream_id)
+ORDER BY (session_id, stream_id)

@@ -170,7 +170,7 @@ func queryCity(ctx context.Context, conn clickhouse.Conn, sql string, ips []stri
 	}
 	rows, err := conn.Query(ctx, sql, ips)
 	if err != nil {
-		if isUnknownDict(err) {
+		if isDictUnavailable(err) {
 			return nil
 		}
 		return fmt.Errorf("geoip city lookup: %w", err)
@@ -192,7 +192,7 @@ func queryASN(ctx context.Context, conn clickhouse.Conn, sql string, ips []strin
 	}
 	rows, err := conn.Query(ctx, sql, ips)
 	if err != nil {
-		if isUnknownDict(err) {
+		if isDictUnavailable(err) {
 			return nil
 		}
 		return fmt.Errorf("geoip asn lookup: %w", err)
@@ -230,10 +230,14 @@ func DictionariesReady(ctx context.Context, conn clickhouse.Conn) bool {
 	return true
 }
 
-// isUnknownDict reports whether err is a ClickHouse UNKNOWN_DICTIONARY (495).
-func isUnknownDict(err error) bool {
+// isDictUnavailable reports whether err is a ClickHouse dictionary error that
+// should be treated as "no data" rather than a fatal failure:
+//   - 495 UNKNOWN_DICTIONARY: dictionary was never created (no source configured)
+//   - 36  CANNOT_LOAD_DICTIONARY: dictionary exists but its last reload failed
+//     (e.g. source URL temporarily unreachable)
+func isDictUnavailable(err error) bool {
 	var ex *clickhouse.Exception
-	return errors.As(err, &ex) && ex.Code == 495
+	return errors.As(err, &ex) && (ex.Code == 495 || ex.Code == 36)
 }
 
 // splitStatements splits a SQL string into individual statements by semicolon,

@@ -6,29 +6,27 @@ import (
 	"sort"
 
 	"caphouse/components"
-
-	"github.com/google/uuid"
 )
 
 type mockClient struct {
 	meta CaptureMeta
 
-	packets  map[uint64]components.PacketNucleus
-	ethernet map[uint64]*components.EthernetComponent
-	dot1q    map[uint64][]*components.Dot1QComponent
-	linuxSLL map[uint64]*components.LinuxSLLComponent
-	ipv4     map[uint64]*components.IPv4Component
-	ipv6     map[uint64]*components.IPv6Component
-	ipv6Ext  map[uint64][]*components.IPv6ExtComponent
-	tcp      map[uint64]*components.TCPComponent
-	udp      map[uint64]*components.UDPComponent
-	dns      map[uint64]*components.DNSComponent
-	ntp      map[uint64]*components.NTPComponent
+	packets  map[uint32]components.PacketNucleus
+	ethernet map[uint32]*components.EthernetComponent
+	dot1q    map[uint32][]*components.Dot1QComponent
+	linuxSLL map[uint32]*components.LinuxSLLComponent
+	ipv4     map[uint32]*components.IPv4Component
+	ipv6     map[uint32]*components.IPv6Component
+	ipv6Ext  map[uint32][]*components.IPv6ExtComponent
+	tcp      map[uint32]*components.TCPComponent
+	udp      map[uint32]*components.UDPComponent
+	dns      map[uint32]*components.DNSComponent
+	ntp      map[uint32]*components.NTPComponent
 }
 
 func newMockClient(meta CaptureMeta) *mockClient {
-	if meta.CaptureID == uuid.Nil {
-		meta.CaptureID = uuid.New()
+	if meta.SessionID == 0 {
+		meta.SessionID = 1
 	}
 	if meta.Endianness == "" {
 		meta.Endianness = "le"
@@ -41,17 +39,17 @@ func newMockClient(meta CaptureMeta) *mockClient {
 	}
 	return &mockClient{
 		meta:     meta,
-		packets:  map[uint64]components.PacketNucleus{},
-		ethernet: map[uint64]*components.EthernetComponent{},
-		dot1q:    map[uint64][]*components.Dot1QComponent{},
-		linuxSLL: map[uint64]*components.LinuxSLLComponent{},
-		ipv4:     map[uint64]*components.IPv4Component{},
-		ipv6:     map[uint64]*components.IPv6Component{},
-		ipv6Ext:  map[uint64][]*components.IPv6ExtComponent{},
-		tcp:      map[uint64]*components.TCPComponent{},
-		udp:      map[uint64]*components.UDPComponent{},
-		dns:      map[uint64]*components.DNSComponent{},
-		ntp:      map[uint64]*components.NTPComponent{},
+		packets:  map[uint32]components.PacketNucleus{},
+		ethernet: map[uint32]*components.EthernetComponent{},
+		dot1q:    map[uint32][]*components.Dot1QComponent{},
+		linuxSLL: map[uint32]*components.LinuxSLLComponent{},
+		ipv4:     map[uint32]*components.IPv4Component{},
+		ipv6:     map[uint32]*components.IPv6Component{},
+		ipv6Ext:  map[uint32][]*components.IPv6ExtComponent{},
+		tcp:      map[uint32]*components.TCPComponent{},
+		udp:      map[uint32]*components.UDPComponent{},
+		dns:      map[uint32]*components.DNSComponent{},
+		ntp:      map[uint32]*components.NTPComponent{},
 	}
 }
 
@@ -87,7 +85,7 @@ func (m *mockClient) IngestPacket(linkType uint32, p Packet) error {
 }
 
 func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
-	packetIDs := make([]uint64, 0, len(m.packets))
+	packetIDs := make([]uint32, 0, len(m.packets))
 	for id := range m.packets {
 		packetIDs = append(packetIDs, id)
 	}
