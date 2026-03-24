@@ -13,8 +13,6 @@ import (
 
 	"caphouse/components"
 	"caphouse/query"
-
-	"github.com/google/uuid"
 )
 
 // tables returns a query.Tables pre-populated with this client's fully-
@@ -40,15 +38,15 @@ func (c *Client) tables() query.Tables {
 	}
 }
 
-// QueryPackets returns the packet references within the given captures that
-// match f, ordered by (capture_id, packet_id). When captureIDs is nil or
-// empty, all captures are searched.
-func (c *Client) QueryPackets(ctx context.Context, captureIDs []uuid.UUID, f query.Query) ([]query.PacketRef, error) {
-	sub, args, err := f.Subquery(c.tables(), captureIDs)
+// QueryPackets returns the packet references within the given sessions that
+// match f, ordered by (session_id, packet_id). When sessionIDs is nil or
+// empty, all sessions are searched.
+func (c *Client) QueryPackets(ctx context.Context, sessionIDs []uint64, f query.Query) ([]query.PacketRef, error) {
+	sub, args, err := f.Subquery(c.tables(), sessionIDs)
 	if err != nil {
 		return nil, err
 	}
-	sql := "SELECT capture_id, packet_id FROM (" + sub + ") ORDER BY capture_id ASC, packet_id ASC"
+	sql := "SELECT session_id, packet_id FROM (" + sub + ") ORDER BY session_id ASC, packet_id ASC"
 	rows, err := c.conn.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("execute filter: %w", err)
@@ -57,7 +55,7 @@ func (c *Client) QueryPackets(ctx context.Context, captureIDs []uuid.UUID, f que
 	var refs []query.PacketRef
 	for rows.Next() {
 		var r query.PacketRef
-		if err := rows.Scan(&r.CaptureID, &r.PacketID); err != nil {
+		if err := rows.Scan(&r.SessionID, &r.PacketID); err != nil {
 			return nil, fmt.Errorf("scan packet ref: %w", err)
 		}
 		refs = append(refs, r)
@@ -65,27 +63,27 @@ func (c *Client) QueryPackets(ctx context.Context, captureIDs []uuid.UUID, f que
 	return refs, rows.Err()
 }
 
-// ExportCaptureFiltered runs f against captureID to resolve matching packet
+// ExportCaptureFiltered runs f against sessionID to resolve matching packet
 // IDs, then streams those packets as a classic PCAP file. packetsWritten is
 // incremented after each packet (may be nil). Returns the total matched packet
 // count alongside the reader so callers can use it for progress reporting.
-func (c *Client) ExportCaptureFiltered(ctx context.Context, captureID uuid.UUID, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
-	meta, err := c.fetchCaptureMeta(ctx, captureID)
+func (c *Client) ExportCaptureFiltered(ctx context.Context, sessionID uint64, f query.Query, packetsWritten *atomic.Int64) (rc io.ReadCloser, total int64, err error) {
+	meta, err := c.fetchCaptureMeta(ctx, sessionID)
 	if err != nil {
 		return nil, 0, err
 	}
-	refs, err := c.QueryPackets(ctx, []uuid.UUID{captureID}, f)
+	refs, err := c.QueryPackets(ctx, []uint64{sessionID}, f)
 	if err != nil {
 		return nil, 0, err
 	}
-	ids := make([]uint64, len(refs))
+	ids := make([]uint32, len(refs))
 	for i, r := range refs {
 		ids[i] = r.PacketID
 	}
 	ranges := toRanges(ids)
 	pr, pw := io.Pipe()
 	go func() {
-		if err := c.streamCapture(ctx, meta, captureID, ranges, pw, packetsWritten); err != nil {
+		if err := c.streamCapture(ctx, meta, sessionID, ranges, pw, packetsWritten); err != nil {
 			_ = pw.CloseWithError(err)
 			return
 		}
@@ -117,8 +115,6 @@ func (c *Client) queryJSON(ctx context.Context, sql string) ([]map[string]any, e
 		for i, col := range cols {
 			v := reflect.ValueOf(ptrs[i]).Elem().Interface()
 			switch tv := v.(type) {
-			case uuid.UUID:
-				row[col] = tv.String()
 			case uint64:
 				// Serialize as string to avoid JS precision loss for values > 2^53.
 				row[col] = strconv.FormatUint(tv, 10)
@@ -142,10 +138,10 @@ func (c *Client) queryJSON(ctx context.Context, sql string) ([]map[string]any, e
 // metadata and the requested component fields as JSON-serializable maps.
 // Each map key is a column name; values are native Go types (string, uint64,
 // int64, etc.) that marshal cleanly to JSON.
-// When captureIDs is nil or empty, all captures are searched.
+// When sessionIDs is nil or empty, all sessions are searched.
 // fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
-func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.Query, comps []string, limit, offset int, fromNs, toNs int64, asc bool) ([]map[string]any, error) {
-	sql, err := q.SearchSQL(c.tables(), captureIDs, comps, limit, offset, fromNs, toNs, asc)
+func (c *Client) QueryJSON(ctx context.Context, sessionIDs []uint64, q query.Query, comps []string, limit, offset int, fromNs, toNs int64, asc bool) ([]map[string]any, error) {
+	sql, err := q.SearchSQL(c.tables(), sessionIDs, comps, limit, offset, fromNs, toNs, asc)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +154,7 @@ func (c *Client) QueryJSON(ctx context.Context, captureIDs []uuid.UUID, q query.
 
 // QueryPacketComponents fetches all parsed component fields for a single packet,
 // joining every registered component table. Returns nil when the packet is not found.
-func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID, packetID uint64) (map[string]any, error) {
+func (c *Client) QueryPacketComponents(ctx context.Context, sessionID uint64, packetID uint32) (map[string]any, error) {
 	t := c.tables()
 
 	// All registered component aliases, sorted for stable SQL generation.
@@ -168,9 +164,9 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	}
 
 	selectParts := []string{
-		"p.capture_id AS capture_id",
+		"p.session_id AS session_id",
 		"p.packet_id AS packet_id",
-		"toInt64(toUnixTimestamp64Nano(cap.created_at)) + toInt64(p.ts) AS timestamp_ns",
+		"p.ts AS timestamp_ns",
 		"p.incl_len AS incl_len",
 		"p.incl_len + p.trunc_extra AS orig_len",
 		"toUInt64(p.components) AS components",
@@ -185,7 +181,7 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	for _, alias := range allComps {
 		info := t.Components[alias]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.capture_id = p.capture_id AND %s.packet_id = p.packet_id",
+			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
 				info.TableRef, alias, alias, alias),
 		)
 	}
@@ -193,13 +189,12 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 	var sb strings.Builder
 	sb.WriteString("SELECT\n    ")
 	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
-	sb.WriteString(fmt.Sprintf("\nINNER JOIN (SELECT capture_id, created_at FROM %s LIMIT 1 BY capture_id) cap ON p.capture_id = cap.capture_id", t.Captures))
+	fmt.Fprintf(&sb, "\nFROM %s AS p", t.Packets)
 	for _, j := range joins {
 		sb.WriteString("\n")
 		sb.WriteString(j)
 	}
-	sb.WriteString(fmt.Sprintf("\nWHERE p.capture_id = '%s' AND p.packet_id = %d", captureID, packetID))
+	fmt.Fprintf(&sb, "\nWHERE p.session_id = %d AND p.packet_id = %d", sessionID, packetID)
 	sb.WriteString("\nLIMIT 1")
 
 	rows, err := c.queryJSON(ctx, sb.String())
@@ -214,12 +209,12 @@ func (c *Client) QueryPacketComponents(ctx context.Context, captureID uuid.UUID,
 
 // QueryPacketFrame reconstructs the original frame bytes for a single packet.
 // Returns nil when the packet is not found.
-func (c *Client) QueryPacketFrame(ctx context.Context, captureID uuid.UUID, packetID uint64) ([]byte, error) {
+func (c *Client) QueryPacketFrame(ctx context.Context, sessionID uint64, packetID uint32) ([]byte, error) {
 	q := fmt.Sprintf(
-		"SELECT incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s WHERE capture_id = ? AND packet_id = ? LIMIT 1",
+		"SELECT incl_len, trunc_extra, components, frame_raw, frame_hash FROM %s WHERE session_id = ? AND packet_id = ? LIMIT 1",
 		c.packetsTable(),
 	)
-	row := c.conn.QueryRow(ctx, q, captureID, packetID)
+	row := c.conn.QueryRow(ctx, q, sessionID, packetID)
 
 	var (
 		inclLen    uint32
@@ -236,7 +231,7 @@ func (c *Client) QueryPacketFrame(ctx context.Context, captureID uuid.UUID, pack
 	}
 
 	nucleus := components.PacketNucleus{
-		CaptureID:  captureID,
+		SessionID:  sessionID,
 		PacketID:   packetID,
 		InclLen:    inclLen,
 		OrigLen:    inclLen + truncExtra,
@@ -245,7 +240,7 @@ func (c *Client) QueryPacketFrame(ctx context.Context, captureID uuid.UUID, pack
 		FrameHash:  []byte(frameHash),
 	}
 
-	all, err := c.fetchComponentsForBatch(ctx, captureID, []uint64{packetID})
+	all, err := c.fetchComponentsForBatch(ctx, sessionID, []uint32{packetID})
 	if err != nil {
 		return nil, fmt.Errorf("fetch components: %w", err)
 	}
@@ -268,12 +263,34 @@ type CountBin struct {
 	Count uint64 `json:"count"`
 }
 
+// BreakdownBin holds the packet count for a single (time bin, breakdown value) pair.
+type BreakdownBin struct {
+	BinStartNs int64  `json:"bin_start_ns"`
+	Value      string `json:"value"`
+	Count      uint64 `json:"count"`
+}
+
 // QueryCounts executes a packet-count histogram. Packets matched by f are
 // bucketed into fixed-width time bins of binSizeSeconds seconds.
-// When captureIDs is nil or empty, all captures are searched.
+// When sessionIDs is nil or empty, all sessions are searched.
 // fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
-func (c *Client) QueryCounts(ctx context.Context, captureIDs []uuid.UUID, f query.Query, binSizeSeconds int64, fromNs, toNs int64, tzOffsetSeconds int64) ([]CountBin, error) {
-	sql, err := f.CountsSQL(c.tables(), captureIDs, binSizeSeconds*int64(1e9), fromNs, toNs, tzOffsetSeconds*int64(1e9))
+func (c *Client) QueryCounts(
+	ctx context.Context,
+	sessionIDs []uint64,
+	f query.Query,
+	binSizeSeconds int64,
+	fromNs, toNs int64,
+	tzOffsetSeconds int64,
+) ([]CountBin, error) {
+	sql, err := f.CountsSQL(
+		c.tables(),
+		sessionIDs,
+		binSizeSeconds*int64(1e9),
+		fromNs,
+		toNs,
+		tzOffsetSeconds*int64(1e9),
+		nil,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -293,15 +310,101 @@ func (c *Client) QueryCounts(ctx context.Context, captureIDs []uuid.UUID, f quer
 	return bins, rows.Err()
 }
 
-// GenerateSQL returns a SELECT statement equivalent to the filter query with
-// all bind parameters inlined, scoped to a single capture. comps is a list of
-// protocol component names (e.g. "ipv4", "tcp") to LEFT JOIN.
-func (c *Client) GenerateSQL(captureID uuid.UUID, q query.Query, comps []string) (string, error) {
-	return q.SQL(c.tables(), []uuid.UUID{captureID}, comps)
+// QueryCountsBreakdown executes a breakdown histogram. Returns one entry per
+// (time bin, breakdown value) pair. When sessionIDs is nil or empty, all sessions
+// are searched. fromNs and toNs are optional Unix-nanosecond bounds (0 = unset).
+func (c *Client) QueryCountsBreakdown(
+	ctx context.Context,
+	sessionIDs []uint64,
+	f query.Query,
+	binSizeSeconds int64,
+	fromNs, toNs int64,
+	tzOffsetSeconds int64,
+	breakdown []query.BreakdownField,
+) ([]BreakdownBin, error) {
+	sql, err := f.CountsSQL(
+		c.tables(),
+		sessionIDs,
+		binSizeSeconds*int64(1e9),
+		fromNs,
+		toNs,
+		tzOffsetSeconds*int64(1e9),
+		breakdown,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := c.conn.Query(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("execute breakdown counts: %w", err)
+	}
+	defer rows.Close()
+	var bins []BreakdownBin
+	for rows.Next() {
+		var b BreakdownBin
+		if err := rows.Scan(&b.BinStartNs, &b.Value, &b.Count); err != nil {
+			return nil, fmt.Errorf("scan breakdown bin: %w", err)
+		}
+		bins = append(bins, b)
+	}
+	return bins, rows.Err()
 }
 
-// GenerateSQLForCaptures is like GenerateSQL but scoped to multiple captures.
-// When captureIDs is nil or empty, the generated SQL covers all captures.
-func (c *Client) GenerateSQLForCaptures(captureIDs []uuid.UUID, q query.Query, comps []string) (string, error) {
-	return q.SQL(c.tables(), captureIDs, comps)
+// GenerateSQL returns a SELECT statement equivalent to the filter query with
+// all bind parameters inlined, scoped to a single session.
+func (c *Client) GenerateSQL(sessionID uint64, q query.Query, comps []string) (string, error) {
+	return q.SQL(c.tables(), []uint64{sessionID}, comps)
+}
+
+// GenerateSQLForSessions is like GenerateSQL but scoped to multiple sessions.
+// When sessionIDs is nil or empty, the generated SQL covers all sessions.
+func (c *Client) GenerateSQLForSessions(sessionIDs []uint64, q query.Query, comps []string) (string, error) {
+	return q.SQL(c.tables(), sessionIDs, comps)
+}
+
+// ParseBreakdownSpec parses a comma-separated breakdown specification into a slice
+// of BreakdownFields. It handles the special "proto" keyword by building the SQL
+// expression dynamically from the component registry, so adding a new component
+// automatically includes it in proto breakdowns.
+func (c *Client) ParseBreakdownSpec(spec string) ([]query.BreakdownField, error) {
+	parts := strings.Split(spec, ",")
+	fields := make([]query.BreakdownField, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == "proto" {
+			fields = append(fields, c.protoBreakdownField())
+			continue
+		}
+		bf, err := query.ParseBreakdownField(p)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, bf)
+	}
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("no valid breakdown fields provided")
+	}
+	return fields, nil
+}
+
+// protoBreakdownField builds a BreakdownField that converts the p.components
+// bitmask into a slash-separated protocol string (e.g. "eth/ipv4/tcp").
+// The expression is derived from the live component registry so that adding a
+// new component automatically updates the proto breakdown.
+func (c *Client) protoBreakdownField() query.BreakdownField {
+	parts := make([]string, 0, len(components.KnownComponentKinds))
+	for _, kind := range components.KnownComponentKinds {
+		comp := components.ComponentFactories[kind]()
+		label := strings.TrimPrefix(comp.Table(), "pcap_")
+		bitVal := uint64(1) << kind
+		parts = append(parts,
+			fmt.Sprintf("if(bitAnd(toUInt64(p.components), %d) != 0, '%s', '')", bitVal, label),
+		)
+	}
+	sqlExpr := "arrayStringConcat(arrayFilter(x -> notEmpty(x), [" +
+		strings.Join(parts, ", ") + "]), '/')"
+	return query.BreakdownField{Component: "", SQLExpr: sqlExpr}
 }

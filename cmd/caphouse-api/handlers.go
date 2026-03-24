@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/google/uuid"
 )
 
 // queryError returns a 422 huma error when err is a ClickHouse Exception
@@ -69,7 +69,7 @@ type SearchInput struct {
 
 		// CaptureIDs restricts the search to specific captures.
 		// When empty or omitted, all captures are searched.
-		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of capture UUIDs to restrict the search. Searches all captures when omitted."`
+		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
 
 		// Components lists protocol component tables to LEFT JOIN into the result,
 		// e.g. ["ipv4", "tcp"]. Valid values: ethernet, dot1q, linuxsll, ipv4,
@@ -91,9 +91,9 @@ type SearchInput struct {
 type SearchOutput struct {
 	Body struct {
 		// Packets holds one map per matched packet. Each map always contains
-		// capture_id, packet_id, timestamp_ns (Unix nanoseconds), incl_len,
+		// session_id, packet_id, timestamp_ns (Unix nanoseconds), incl_len,
 		// and orig_len, plus any columns from the requested component tables.
-		Packets []map[string]any `json:"packets" doc:"Matched packet rows. Each entry includes capture_id, packet_id, timestamp_ns, incl_len, orig_len, and any requested component fields."`
+		Packets []map[string]any `json:"packets" doc:"Matched packet rows. Each entry includes session_id, packet_id, timestamp_ns, incl_len, orig_len, and any requested component fields."`
 
 		// Count is the number of matched packets.
 		Count int `json:"count" doc:"Total number of matched packets."`
@@ -112,7 +112,7 @@ type CountsInput struct {
 		To   time.Time `json:"to,omitempty" doc:"End of the time window (RFC 3339). Requires 'from'."`
 
 		// CaptureIDs restricts the search to specific captures.
-		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of capture UUIDs to restrict the search. Searches all captures when omitted."`
+		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
 
 		// BinSeconds is the histogram bin width in seconds. Defaults to 60.
 		BinSeconds int64 `json:"bin_seconds,omitempty" doc:"Bin width in seconds (default: 60, minimum: 1)."`
@@ -120,6 +120,10 @@ type CountsInput struct {
 		// TzOffsetSeconds is the client's UTC offset in seconds (e.g. 7200 for UTC+2).
 		// Used to align daily (and other) bins to local midnight instead of UTC midnight.
 		TzOffsetSeconds int64 `json:"tz_offset_seconds,omitempty" doc:"Client UTC offset in seconds (e.g. 7200 for UTC+2). Aligns bins to local midnight."`
+
+		// Breakdown is an optional field expression to group by (e.g. "ipv4.src", "tcp.dst", "ipv4.addr").
+		// When provided, the response includes breakdown_bins instead of bins.
+		Breakdown string `json:"breakdown,omitempty" doc:"Optional field expression to group the histogram by (e.g. 'ipv4.src', 'tcp.dst', 'ipv4.addr'). When provided, breakdown_bins is populated instead of bins."`
 	}
 }
 
@@ -127,17 +131,20 @@ type CountsInput struct {
 type CountsOutput struct {
 	Body struct {
 		// Bins holds one entry per non-empty time bin.
-		Bins []caphouse.CountBin `json:"bins" doc:"Packet counts per time bin. Only bins that contain at least one matched packet are returned."`
+		Bins []caphouse.CountBin `json:"bins,omitempty" doc:"Packet counts per time bin. Only bins that contain at least one matched packet are returned."`
 
 		// BinSeconds is the bin width used, echoed back for convenience.
 		BinSeconds int64 `json:"bin_seconds" doc:"Bin width in seconds used for this response."`
+
+		// BreakdownBins holds per-(bin, value) counts when a breakdown was requested. Nil otherwise.
+		BreakdownBins []caphouse.BreakdownBin `json:"breakdown_bins,omitempty" doc:"Per-(bin, value) counts when breakdown was requested."`
 	}
 }
 
 // PacketDetailsInput is the request for GET /v1/captures/{capture_id}/packets/{packet_id}.
 type PacketDetailsInput struct {
-	CaptureID string `path:"capture_id" doc:"UUID of the capture."`
-	PacketID  uint64 `path:"packet_id" doc:"Packet ID within the capture."`
+	CaptureID string `path:"capture_id" doc:"Session ID (uint64) of the capture."`
+	PacketID  uint32 `path:"packet_id" doc:"Packet ID within the capture."`
 }
 
 // PacketDetailsOutput is the response for GET /v1/captures/{capture_id}/packets/{packet_id}.
@@ -149,8 +156,8 @@ type PacketDetailsOutput struct {
 
 // PacketFrameInput is the request for GET /v1/captures/{capture_id}/packets/{packet_id}/frame.
 type PacketFrameInput struct {
-	CaptureID string `path:"capture_id" doc:"UUID of the capture."`
-	PacketID  uint64 `path:"packet_id" doc:"Packet ID within the capture."`
+	CaptureID string `path:"capture_id" doc:"Session ID (uint64) of the capture."`
+	PacketID  uint32 `path:"packet_id" doc:"Packet ID within the capture."`
 }
 
 // PacketFrameOutput is the response for GET /v1/captures/{capture_id}/packets/{packet_id}/frame.
@@ -162,8 +169,8 @@ type PacketFrameOutput struct {
 
 // ExportCaptureInput is the request for POST /v1/captures/{capture_id}/export.
 type ExportCaptureInput struct {
-	// CaptureID is the UUID of the capture to export.
-	CaptureID string `path:"capture_id" doc:"UUID of the capture to export."`
+	// CaptureID is the session ID of the capture to export.
+	CaptureID string `path:"capture_id" doc:"Session ID (uint64) of the capture to export."`
 
 	Body struct {
 		// Query is an optional ClickHouse WHERE clause. When omitted all packets are exported.
@@ -203,7 +210,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Path:        "/v1/search",
 		Summary:     "Search packets",
 		Description: "Filter packets across one or more captures using a ClickHouse WHERE clause. " +
-			"Returns JSON rows with basic packet metadata (capture_id, packet_id, timestamp_ns, incl_len, orig_len) " +
+			"Returns JSON rows with basic packet metadata (session_id, packet_id, timestamp_ns, incl_len, orig_len) " +
 			"plus any protocol component fields requested via the components list.",
 		Tags: []string{"search"},
 	}, func(ctx context.Context, input *SearchInput) (*SearchOutput, error) {
@@ -212,7 +219,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
 
-		captureIDs, err := parseUUIDs(input.Body.CaptureIDs)
+		captureIDs, err := parseSessionIDs(input.Body.CaptureIDs)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
@@ -262,7 +269,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
 
-		captureIDs, err := parseUUIDs(input.Body.CaptureIDs)
+		captureIDs, err := parseSessionIDs(input.Body.CaptureIDs)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
@@ -273,6 +280,34 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		}
 
 		fromNs, toNs := timeRangeNs(input.Body.From, input.Body.To)
+
+		if input.Body.Breakdown != "" {
+			bd, err := client.ParseBreakdownSpec(input.Body.Breakdown)
+			if err != nil {
+				return nil, huma.Error400BadRequest(fmt.Sprintf("invalid breakdown: %s", err))
+			}
+			breakdownBins, err := client.QueryCountsBreakdown(ctx, captureIDs, q, binSeconds, fromNs, toNs, input.Body.TzOffsetSeconds, bd)
+			if err != nil {
+				if cerr := clientGone(ctx, err); cerr != nil {
+					return nil, cerr
+				}
+				if cerr := connectivityError(err); cerr != nil {
+					return nil, cerr
+				}
+				if qerr := queryError(err); qerr != nil {
+					return nil, qerr
+				}
+				return nil, fmt.Errorf("breakdown counts: %w", err)
+			}
+			if breakdownBins == nil {
+				breakdownBins = []caphouse.BreakdownBin{}
+			}
+			out := &CountsOutput{}
+			out.Body.BinSeconds = binSeconds
+			out.Body.BreakdownBins = breakdownBins
+			return out, nil
+		}
+
 		bins, err := client.QueryCounts(ctx, captureIDs, q, binSeconds, fromNs, toNs, input.Body.TzOffsetSeconds)
 		if err != nil {
 			if cerr := clientGone(ctx, err); cerr != nil {
@@ -305,11 +340,11 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Description: "Returns all parsed component fields for a single packet, organised by layer.",
 		Tags:        []string{"search"},
 	}, func(ctx context.Context, input *PacketDetailsInput) (*PacketDetailsOutput, error) {
-		captureID, err := uuid.Parse(input.CaptureID)
+		sessionID, err := strconv.ParseUint(input.CaptureID, 10, 64)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
-		pkt, err := client.QueryPacketComponents(ctx, captureID, input.PacketID)
+		pkt, err := client.QueryPacketComponents(ctx, sessionID, input.PacketID)
 		if err != nil {
 			if cerr := clientGone(ctx, err); cerr != nil {
 				return nil, cerr
@@ -336,11 +371,11 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		Description: "Returns the fully reconstructed original frame bytes as a hex string.",
 		Tags:        []string{"search"},
 	}, func(ctx context.Context, input *PacketFrameInput) (*PacketFrameOutput, error) {
-		captureID, err := uuid.Parse(input.CaptureID)
+		sessionID, err := strconv.ParseUint(input.CaptureID, 10, 64)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
-		frame, err := client.QueryPacketFrame(ctx, captureID, input.PacketID)
+		frame, err := client.QueryPacketFrame(ctx, sessionID, input.PacketID)
 		if err != nil {
 			if cerr := clientGone(ctx, err); cerr != nil {
 				return nil, cerr
@@ -369,7 +404,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			"When no filter is provided the entire capture is exported.",
 		Tags: []string{"export"},
 	}, func(ctx context.Context, input *ExportCaptureInput) (*huma.StreamResponse, error) {
-		captureID, err := uuid.Parse(input.CaptureID)
+		sessionID, err := strconv.ParseUint(input.CaptureID, 10, 64)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
@@ -380,23 +415,23 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			if err != nil {
 				return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 			}
-			rc, _, err = client.ExportCaptureFiltered(ctx, captureID, q, nil)
+			rc, _, err = client.ExportCaptureFiltered(ctx, sessionID, q, nil)
 			if err != nil {
 				if cerr := clientGone(ctx, err); cerr != nil {
-				return nil, cerr
-			}
-			if cerr := connectivityError(err); cerr != nil {
+					return nil, cerr
+				}
+				if cerr := connectivityError(err); cerr != nil {
 					return nil, cerr
 				}
 				return nil, fmt.Errorf("export: %w", err)
 			}
 		} else {
-			rc, err = client.ExportCapture(ctx, captureID)
+			rc, err = client.ExportCapture(ctx, sessionID)
 			if err != nil {
 				if cerr := clientGone(ctx, err); cerr != nil {
-				return nil, cerr
-			}
-			if cerr := connectivityError(err); cerr != nil {
+					return nil, cerr
+				}
+				if cerr := connectivityError(err); cerr != nil {
 					return nil, cerr
 				}
 				return nil, fmt.Errorf("export: %w", err)
@@ -407,7 +442,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			Body: func(hctx huma.Context) {
 				defer rc.Close()
 				hctx.SetHeader("Content-Type", "application/vnd.tcpdump.pcap")
-				hctx.SetHeader("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pcap"`, captureID))
+				hctx.SetHeader("Content-Disposition", fmt.Sprintf(`attachment; filename="%d.pcap"`, sessionID))
 				w := hctx.BodyWriter()
 				io.Copy(w, rc) //nolint:errcheck
 			},
@@ -488,14 +523,14 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 	})
 }
 
-// parseUUIDs parses a slice of UUID strings, returning nil when the input is empty.
-func parseUUIDs(ids []string) ([]uuid.UUID, error) {
+// parseSessionIDs parses a slice of decimal uint64 session ID strings, returning nil when the input is empty.
+func parseSessionIDs(ids []string) ([]uint64, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	result := make([]uuid.UUID, len(ids))
+	result := make([]uint64, len(ids))
 	for i, s := range ids {
-		id, err := uuid.Parse(s)
+		id, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("%q: %w", s, err)
 		}
