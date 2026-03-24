@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +26,30 @@ func queryError(err error) error {
 	var ex *clickhouse.Exception
 	if errors.As(err, &ex) {
 		return huma.Error422UnprocessableEntity(fmt.Sprintf("invalid query: %s", ex.Message))
+	}
+	return nil
+}
+
+// clientGone returns a 499 huma error when the request context was cancelled
+// (i.e. the HTTP client disconnected before the response was sent).  Handlers
+// should check this before connectivityError so that a broken-pipe caused by
+// the client going away is not mis-classified as a ClickHouse connectivity
+// problem.
+func clientGone(ctx context.Context, err error) error {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return huma.NewError(499, "client closed request")
+	}
+	return nil
+}
+
+// connectivityError returns a 503 huma error when err indicates a network-level
+// failure reaching ClickHouse (timeout, connection refused, EOF, etc.), and nil
+// otherwise.
+func connectivityError(err error) error {
+	var netErr net.Error
+	var opErr *net.OpError
+	if errors.As(err, &netErr) || errors.As(err, &opErr) || errors.Is(err, io.EOF) {
+		return huma.NewError(http.StatusServiceUnavailable, "connection with ClickHouse DB lost")
 	}
 	return nil
 }
@@ -55,6 +81,9 @@ type SearchInput struct {
 
 		// Offset is the number of rows to skip for pagination.
 		Offset int `json:"offset,omitempty" doc:"Number of rows to skip (default: 0)."`
+
+		// Order controls the timestamp sort direction: "asc" or "desc" (default).
+		Order string `json:"order,omitempty" doc:"Timestamp sort direction: 'asc' or 'desc' (default: 'desc')."`
 	}
 }
 
@@ -193,8 +222,15 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			limit = 1000
 		}
 		fromNs, toNs := timeRangeNs(input.Body.From, input.Body.To)
-		packets, err := client.QueryJSON(ctx, captureIDs, q, input.Body.Components, limit, input.Body.Offset, fromNs, toNs)
+		asc := input.Body.Order == "asc"
+		packets, err := client.QueryJSON(ctx, captureIDs, q, input.Body.Components, limit, input.Body.Offset, fromNs, toNs, asc)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			if qerr := queryError(err); qerr != nil {
 				return nil, qerr
 			}
@@ -210,11 +246,11 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		return out, nil
 	})
 
-	// POST /v1/stats/counts
+	// POST /v1/stats/hist
 	huma.Register(api, huma.Operation{
-		OperationID: "stats-counts",
+		OperationID: "stats-hist",
 		Method:      "POST",
-		Path:        "/v1/stats/counts",
+		Path:        "/v1/stats/hist",
 		Summary:     "Packet count histogram",
 		Description: "Returns a time-bucketed packet count histogram for packets matching the filter. " +
 			"Only bins containing at least one matched packet are returned. " +
@@ -232,13 +268,19 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		}
 
 		binSeconds := input.Body.BinSeconds
-		if binSeconds <= 0 {
+		if binSeconds < 1 {
 			binSeconds = 60
 		}
 
 		fromNs, toNs := timeRangeNs(input.Body.From, input.Body.To)
 		bins, err := client.QueryCounts(ctx, captureIDs, q, binSeconds, fromNs, toNs, input.Body.TzOffsetSeconds)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			if qerr := queryError(err); qerr != nil {
 				return nil, qerr
 			}
@@ -269,6 +311,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		}
 		pkt, err := client.QueryPacketComponents(ctx, captureID, input.PacketID)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			return nil, fmt.Errorf("get packet components: %w", err)
 		}
 		if pkt == nil {
@@ -294,6 +342,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		}
 		frame, err := client.QueryPacketFrame(ctx, captureID, input.PacketID)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			return nil, fmt.Errorf("get packet frame: %w", err)
 		}
 		if frame == nil {
@@ -328,11 +382,23 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			}
 			rc, _, err = client.ExportCaptureFiltered(ctx, captureID, q, nil)
 			if err != nil {
+				if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+					return nil, cerr
+				}
 				return nil, fmt.Errorf("export: %w", err)
 			}
 		} else {
 			rc, err = client.ExportCapture(ctx, captureID)
 			if err != nil {
+				if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+					return nil, cerr
+				}
 				return nil, fmt.Errorf("export: %w", err)
 			}
 		}
@@ -370,6 +436,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 		var written atomic.Int64
 		rc, total, err := client.ExportAllCapturesFiltered(ctx, input.Body.From, input.Body.To, f, &written)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			return nil, fmt.Errorf("export: %w", err)
 		}
 
@@ -404,6 +476,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 	}, func(ctx context.Context, input *GeoIPBatchInput) (*GeoIPBatchOutput, error) {
 		result, err := client.GeoIPLookupBatch(ctx, input.Body.IPs)
 		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			if cerr := connectivityError(err); cerr != nil {
+				return nil, cerr
+			}
 			return nil, fmt.Errorf("geoip batch: %w", err)
 		}
 		return &GeoIPBatchOutput{Body: result}, nil

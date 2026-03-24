@@ -211,6 +211,25 @@ func queryASN(ctx context.Context, conn clickhouse.Conn, sql string, ips []strin
 	return rows.Err()
 }
 
+// DictionariesReady returns true when all four dictionaries (ip_trie,
+// ip_trie_v6, asn_trie, asn_trie_v6) respond to a lightweight probe lookup.
+// It is used to skip the expensive CSV re-import on restart when the data is
+// already loaded.
+func DictionariesReady(ctx context.Context, conn clickhouse.Conn) bool {
+	probes := []string{
+		`SELECT dictGetOrDefault('ip_trie',    'country_code', tuple(toIPv4OrDefault('1.1.1.1')), '')`,
+		`SELECT dictGetOrDefault('ip_trie_v6', 'country_code', tuple(toIPv6OrDefault('2606:4700::1')), '')`,
+		`SELECT dictGetOrDefault('asn_trie',   'asn',          tuple(toIPv4OrDefault('1.1.1.1')), '')`,
+		`SELECT dictGetOrDefault('asn_trie_v6','asn',          tuple(toIPv6OrDefault('2606:4700::1')), '')`,
+	}
+	for _, sql := range probes {
+		if err := conn.QueryRow(ctx, sql).Scan(new(string)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // isUnknownDict reports whether err is a ClickHouse UNKNOWN_DICTIONARY (495).
 func isUnknownDict(err error) bool {
 	var ex *clickhouse.Exception

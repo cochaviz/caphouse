@@ -115,6 +115,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 }
 
 // Close closes the underlying connection.
+// Conn returns the underlying ClickHouse connection.
+func (c *Client) Conn() clickhouse.Conn { return c.conn }
+
 func (c *Client) Close() error {
 	return c.conn.Close()
 }
