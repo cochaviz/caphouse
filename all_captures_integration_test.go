@@ -278,4 +278,3 @@ func TestExportAllStabilityWithinCapture(t *testing.T) {
 		}
 	}
 }
-

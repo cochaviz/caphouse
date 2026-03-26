@@ -15,9 +15,9 @@ import (
 
 	"caphouse/components"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 // CreateCapture inserts a session record. If a session with the same ID already

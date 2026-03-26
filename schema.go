@@ -115,7 +115,6 @@ func (c *Client) componentTable(kind uint) string {
 	return c.tableRef(components.ComponentFactories[kind]().Table())
 }
 
-
 func quoteIdent(name string) string {
 	return "`" + name + "`"
 }

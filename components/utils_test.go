@@ -24,7 +24,7 @@ func (b *fakeBatch) Append(v ...any) error {
 	b.appended = append(b.appended, row)
 	return nil
 }
-func (b *fakeBatch) AppendStruct(v any) error { return nil }
+func (b *fakeBatch) AppendStruct(v any) error    { return nil }
 func (b *fakeBatch) Columns() []column.Interface { return nil }
 func (b *fakeBatch) Column(int) driver.BatchColumn {
 	return fakeBatchColumn{}

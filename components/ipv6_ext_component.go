@@ -13,21 +13,21 @@ var ipv6ExtSchemaSQL string
 
 // IPv6ExtComponent stores one raw IPv6 extension header (repeatable).
 type IPv6ExtComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
-	ExtIndex     uint16    `ch:"ext_index"`
-	ExtType      uint16    `ch:"ext_type"`
-	ExtRaw       []byte    `ch:"ext_raw"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
+	ExtIndex     uint16 `ch:"ext_index"`
+	ExtType      uint16 `ch:"ext_type"`
+	ExtRaw       []byte `ch:"ext_raw"`
 }
 
-func (c *IPv6ExtComponent) Kind() uint            { return ComponentIPv6Ext }
-func (c *IPv6ExtComponent) Table() string         { return "pcap_ipv6_ext" }
-func (c *IPv6ExtComponent) Order() uint           { return OrderL3Ext }
-func (c *IPv6ExtComponent) Index() uint16         { return c.ExtIndex }
-func (c *IPv6ExtComponent) SetIndex(i uint16)     { c.ExtIndex = i }
-func (c *IPv6ExtComponent) FetchOrderBy() string  { return "packet_id, ext_index" }
+func (c *IPv6ExtComponent) Kind() uint           { return ComponentIPv6Ext }
+func (c *IPv6ExtComponent) Table() string        { return "pcap_ipv6_ext" }
+func (c *IPv6ExtComponent) Order() uint          { return OrderL3Ext }
+func (c *IPv6ExtComponent) Index() uint16        { return c.ExtIndex }
+func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.ExtIndex = i }
+func (c *IPv6ExtComponent) FetchOrderBy() string { return "packet_id, ext_index" }
 
 func (c *IPv6ExtComponent) HeaderLen() int {
 	if len(c.ExtRaw) < 2 {

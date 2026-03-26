@@ -76,11 +76,11 @@ func TestDNSEncodeBasic(t *testing.T) {
 func TestDNSEncodeFlags(t *testing.T) {
 	dns := &layers.DNS{
 		ID: 0xabcd,
-		QR: true,  // response
-		AA: true,  // authoritative
-		TC: true,  // truncated
-		RD: true,  // recursion desired
-		RA: true,  // recursion available
+		QR: true, // response
+		AA: true, // authoritative
+		TC: true, // truncated
+		RD: true, // recursion desired
+		RA: true, // recursion available
 	}
 	data := buildDNSBytes(t, dns)
 	parsed := parseDNSLayer(t, data)

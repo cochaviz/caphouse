@@ -16,10 +16,10 @@ var udpSchemaSQL string
 
 // UDPComponent stores parsed UDP header fields.
 type UDPComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
 
 	SrcPort  uint16 `ch:"src"`
 	DstPort  uint16 `ch:"dst"`

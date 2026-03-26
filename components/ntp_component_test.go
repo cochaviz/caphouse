@@ -24,15 +24,15 @@ func buildNTPBytes(t *testing.T, ntp *layers.NTP) []byte {
 
 func TestNTPEncodeBasic(t *testing.T) {
 	ntp := &layers.NTP{
-		LeapIndicator:     0,
-		Version:           4,
-		Mode:              3, // client
-		Stratum:           0,
-		Poll:              3,
-		Precision:         -6,
-		RootDelay:         0x00010000,
-		RootDispersion:    0x00020000,
-		ReferenceID:       0x4c4f434c,
+		LeapIndicator:      0,
+		Version:            4,
+		Mode:               3, // client
+		Stratum:            0,
+		Poll:               3,
+		Precision:          -6,
+		RootDelay:          0x00010000,
+		RootDispersion:     0x00020000,
+		ReferenceID:        0x4c4f434c,
 		ReferenceTimestamp: 0xE63B_7B00_00000000,
 		TransmitTimestamp:  0xE63B_7C00_12345678,
 	}

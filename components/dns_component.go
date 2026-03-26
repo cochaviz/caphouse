@@ -20,13 +20,13 @@ var dnsSchemaSQL string
 // so no raw frame bytes need to be stored. Reconstructed packets are semantically identical
 // to the originals but will not use DNS name compression (RFC 1035 §4.1.4).
 type DNSComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
 
 	TransactionID uint16 `ch:"transaction_id"`
-	QR            uint8  `ch:"qr"`     // 0=query 1=response
+	QR            uint8  `ch:"qr"` // 0=query 1=response
 	Opcode        uint8  `ch:"opcode"`
 	RCode         uint8  `ch:"rcode"`
 	Flags         uint8  `ch:"flags"` // AA|TC|RD|RA packed
