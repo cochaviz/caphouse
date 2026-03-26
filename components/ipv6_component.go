@@ -18,13 +18,10 @@ var ipv6SchemaSQL string
 // IPv6Component stores parsed IPv6 fields.
 type IPv6Component struct {
 	SessionID uint64 `ch:"session_id"`
-	Ts        int64     `ch:"ts"`
+	Ts        int64  `ch:"ts"`
 	PacketID  uint32 `ch:"packet_id"`
 
 	CodecVersion uint16 `ch:"codec_version"`
-
-	ParsedOK uint8  `ch:"parsed_ok"`
-	ParseErr string `ch:"parse_err"`
 
 	Protocol uint8 `ch:"protocol"`
 
@@ -53,8 +50,7 @@ func (c *IPv6Component) ClickhouseColumns() ([]string, error) {
 func (c *IPv6Component) ClickhouseValues() ([]any, error) {
 	return []any{
 		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.ParsedOK, shortErr(c.ParseErr), c.Protocol,
-		ipv6String(c.SrcIP6), ipv6String(c.DstIP6),
+		c.Protocol, ipv6String(c.SrcIP6), ipv6String(c.DstIP6),
 		c.IPv6PayloadLen, c.IPv6HopLimit, c.IPv6FlowLabel, c.IPv6TrafficClass,
 	}, nil
 }
@@ -92,7 +88,7 @@ func (c *IPv6Component) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, e
 	var src, dst string
 	c.SessionID = sessionID
 	err := rows.Scan(
-		&c.PacketID, &c.ParsedOK, &c.ParseErr, &c.Protocol,
+		&c.PacketID, &c.Protocol,
 		&src, &dst,
 		&c.IPv6PayloadLen, &c.IPv6HopLimit, &c.IPv6FlowLabel, &c.IPv6TrafficClass,
 	)
@@ -120,7 +116,6 @@ func (c *IPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {
 	}
 	return []Component{&IPv6Component{
 		CodecVersion:     CodecVersionV1,
-		ParsedOK:         1,
 		Protocol:         uint8(ip6.NextHeader),
 		SrcIP6:           src,
 		DstIP6:           dst,

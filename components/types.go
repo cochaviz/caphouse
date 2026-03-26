@@ -17,23 +17,6 @@ const (
 )
 
 const (
-	ComponentRawFrame uint = iota
-	ComponentEthernet
-	ComponentDot1Q
-	ComponentLinuxSLL
-	ComponentIPv4
-	ComponentIPv6
-	ComponentIPv6Ext
-	ComponentHash
-	ComponentTruncated
-	ComponentTCP
-	ComponentUDP
-	ComponentDNS
-	ComponentNTP
-	ComponentARP
-)
-
-const (
 	OrderL2Base uint = iota
 	OrderL2Tag
 	OrderL3Base
@@ -41,20 +24,6 @@ const (
 	OrderL4Base
 	OrderL7Base
 )
-
-var KnownComponentKinds = []uint{
-	ComponentEthernet,
-	ComponentDot1Q,
-	ComponentLinuxSLL,
-	ComponentIPv4,
-	ComponentIPv6,
-	ComponentIPv6Ext,
-	ComponentTCP,
-	ComponentUDP,
-	ComponentDNS,
-	ComponentNTP,
-	ComponentARP,
-}
 
 var OrderRepeatable = map[uint]bool{
 	OrderL2Tag: true,
@@ -197,21 +166,6 @@ func GetClickhouseColumnsFrom(v any) ([]string, error) {
 	}
 
 	return cols, nil
-}
-
-// ComponentFactories maps component kind constants to zero-value constructors.
-var ComponentFactories = map[uint]func() Component{
-	ComponentEthernet: func() Component { return &EthernetComponent{} },
-	ComponentDot1Q:    func() Component { return &Dot1QComponent{} },
-	ComponentLinuxSLL: func() Component { return &LinuxSLLComponent{} },
-	ComponentIPv4:     func() Component { return &IPv4Component{} },
-	ComponentIPv6:     func() Component { return &IPv6Component{} },
-	ComponentIPv6Ext:  func() Component { return &IPv6ExtComponent{} },
-	ComponentTCP:      func() Component { return &TCPComponent{} },
-	ComponentUDP:      func() Component { return &UDPComponent{} },
-	ComponentDNS:      func() Component { return &DNSComponent{} },
-	ComponentNTP:      func() Component { return &NTPComponent{} },
-	ComponentARP:      func() Component { return &ARPComponent{} },
 }
 
 // GetDataColumnsFrom derives SELECT column expressions from a struct's ch: tags.
