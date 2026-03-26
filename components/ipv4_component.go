@@ -18,13 +18,10 @@ var ipv4SchemaSQL string
 // IPv4Component stores parsed IPv4 fields, including any option bytes.
 type IPv4Component struct {
 	SessionID uint64 `ch:"session_id"`
-	Ts        int64     `ch:"ts"`
+	Ts        int64  `ch:"ts"`
 	PacketID  uint32 `ch:"packet_id"`
 
 	CodecVersion uint16 `ch:"codec_version"`
-
-	ParsedOK uint8  `ch:"parsed_ok"`
-	ParseErr string `ch:"parse_err"`
 
 	Protocol uint8 `ch:"protocol"`
 
@@ -59,8 +56,7 @@ func (c *IPv4Component) ClickhouseColumns() ([]string, error) {
 func (c *IPv4Component) ClickhouseValues() ([]any, error) {
 	return []any{
 		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.ParsedOK, shortErr(c.ParseErr), c.Protocol,
-		ipv4String(c.SrcIP4), ipv4String(c.DstIP4),
+		c.Protocol, ipv4String(c.SrcIP4), ipv4String(c.DstIP4),
 		c.IPv4IHL, c.IPv4TOS, c.IPv4TotalLen, c.IPv4ID,
 		c.IPv4Flags, c.IPv4FragOffset, c.IPv4TTL, c.IPv4HdrChecksum,
 		string(c.OptionsRaw),
@@ -120,7 +116,7 @@ func (c *IPv4Component) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, e
 	var src, dst, optRaw string
 	c.SessionID = sessionID
 	err := rows.Scan(
-		&c.PacketID, &c.ParsedOK, &c.ParseErr, &c.Protocol,
+		&c.PacketID, &c.Protocol,
 		&src, &dst,
 		&c.IPv4IHL, &c.IPv4TOS, &c.IPv4TotalLen, &c.IPv4ID,
 		&c.IPv4Flags, &c.IPv4FragOffset, &c.IPv4TTL, &c.IPv4HdrChecksum,
@@ -158,7 +154,6 @@ func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
 	}
 	comp := &IPv4Component{
 		CodecVersion:    CodecVersionV1,
-		ParsedOK:        1,
 		Protocol:        uint8(ip4.Protocol),
 		SrcIP4:          src,
 		DstIP4:          dst,

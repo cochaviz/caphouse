@@ -5,6 +5,37 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
+const (
+	ComponentRawFrame uint = iota
+	ComponentEthernet
+	ComponentDot1Q
+	ComponentLinuxSLL
+	ComponentIPv4
+	ComponentIPv6
+	ComponentIPv6Ext
+	ComponentHash
+	ComponentTruncated
+	ComponentTCP
+	ComponentUDP
+	ComponentDNS
+	ComponentNTP
+	ComponentARP
+)
+
+var KnownComponentKinds = []uint{
+	ComponentEthernet,
+	ComponentDot1Q,
+	ComponentLinuxSLL,
+	ComponentIPv4,
+	ComponentIPv6,
+	ComponentIPv6Ext,
+	ComponentTCP,
+	ComponentUDP,
+	ComponentDNS,
+	ComponentNTP,
+	ComponentARP,
+}
+
 var LayerEncoders = map[gopacket.LayerType]Component{
 	layers.LayerTypeEthernet:        &EthernetComponent{},
 	layers.LayerTypeDot1Q:           &Dot1QComponent{},
@@ -25,4 +56,19 @@ var LayerEncoders = map[gopacket.LayerType]Component{
 func LayerSupported(layerType gopacket.LayerType) bool {
 	_, ok := LayerEncoders[layerType]
 	return ok
+}
+
+// ComponentFactories maps component kind constants to zero-value constructors.
+var ComponentFactories = map[uint]func() Component{
+	ComponentEthernet: func() Component { return &EthernetComponent{} },
+	ComponentDot1Q:    func() Component { return &Dot1QComponent{} },
+	ComponentLinuxSLL: func() Component { return &LinuxSLLComponent{} },
+	ComponentIPv4:     func() Component { return &IPv4Component{} },
+	ComponentIPv6:     func() Component { return &IPv6Component{} },
+	ComponentIPv6Ext:  func() Component { return &IPv6ExtComponent{} },
+	ComponentTCP:      func() Component { return &TCPComponent{} },
+	ComponentUDP:      func() Component { return &UDPComponent{} },
+	ComponentDNS:      func() Component { return &DNSComponent{} },
+	ComponentNTP:      func() Component { return &NTPComponent{} },
+	ComponentARP:      func() Component { return &ARPComponent{} },
 }

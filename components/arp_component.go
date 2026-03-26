@@ -2,7 +2,6 @@ package components
 
 import (
 	_ "embed"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -17,16 +16,18 @@ var arpSchemaSQL string
 
 // ARPComponent stores parsed ARP header fields.
 type ARPComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
 
-	ArpOp     uint16   `ch:"arp_op"`
-	SenderMAC [6]byte  `ch:"sender_mac"`
-	SenderIP  net.IP   `ch:"sender_ip"`
-	TargetMAC [6]byte  `ch:"target_mac"`
-	TargetIP  net.IP   `ch:"target_ip"`
+	// HwType    [4]byte
+	// AddrType  [4]byte
+	ArpOp     uint16  `ch:"arp_op"`
+	SenderMAC [6]byte `ch:"sender_mac"`
+	SenderIP  net.IP  `ch:"sender_ip"`
+	TargetMAC [6]byte `ch:"target_mac"`
+	TargetIP  net.IP  `ch:"target_ip"`
 }
 
 func (c *ARPComponent) Kind() uint           { return ComponentARP }
@@ -61,25 +62,21 @@ func (c *ARPComponent) Reconstruct(ctx *DecodeContext) error {
 	if c == nil {
 		return errors.New("arp component missing")
 	}
-	// Standard Ethernet/IPv4 ARP: 28 bytes
-	// HTYPE(2) PTYPE(2) HLEN(1) PLEN(1) OPER(2) SHA(6) SPA(4) THA(6) TPA(4)
-	var hdr [28]byte
-	binary.BigEndian.PutUint16(hdr[0:2], 1)    // HTYPE: Ethernet
-	binary.BigEndian.PutUint16(hdr[2:4], 0x0800) // PTYPE: IPv4
-	hdr[4] = 6                                  // HLEN: 6
-	hdr[5] = 4                                  // PLEN: 4
-	binary.BigEndian.PutUint16(hdr[6:8], c.ArpOp)
-	copy(hdr[8:14], c.SenderMAC[:])
-	ip4 := c.SenderIP.To4()
-	if ip4 != nil {
-		copy(hdr[14:18], ip4)
+
+	layer := &layers.ARP{
+		// TODO Actually interpret these two fields from data
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     8,
+		ProtAddressSize:   4,
+		Operation:         c.ArpOp,
+		SourceHwAddress:   c.SenderMAC[:],
+		DstHwAddress:      c.TargetMAC[:],
+		SourceProtAddress: c.SenderIP,
+		DstProtAddress:    c.TargetIP,
 	}
-	copy(hdr[18:24], c.TargetMAC[:])
-	ip4 = c.TargetIP.To4()
-	if ip4 != nil {
-		copy(hdr[24:28], ip4)
-	}
-	ctx.Layers = append(ctx.Layers, gopacket.Payload(hdr[:]))
+
+	ctx.Layers = append(ctx.Layers, layer)
 	ctx.Offset += 28
 	return nil
 }

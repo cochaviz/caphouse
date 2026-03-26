@@ -7,9 +7,6 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   codec_version UInt16,
 
-  parsed_ok UInt8,
-  parse_err LowCardinality(String),
-
   protocol UInt8,
 
   src IPv6,
