@@ -78,7 +78,7 @@ func (s *HTTPSession) Feed(payload []byte) {
 	}
 }
 
-func (s *HTTPSession) Table() string    { return "stream_http" }
+func (s *HTTPSession) Table() string { return "stream_http" }
 func (s *HTTPSession) Columns() []string {
 	return []string{"session_id", "stream_id", "method", "host", "path"}
 }

@@ -15,17 +15,17 @@ var ntpSchemaSQL string
 // NTPComponent stores parsed NTP header fields.
 // ntp_raw holds the full wire bytes for lossless reconstruction.
 type NTPComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
 
-	LeapIndicator  uint8 `ch:"leap_indicator"`
-	Version        uint8 `ch:"version"`
-	Mode           uint8 `ch:"mode"`
-	Stratum        uint8 `ch:"stratum"`
-	Poll           int8  `ch:"poll"`
-	Precision      int8  `ch:"precision"`
+	LeapIndicator  uint8  `ch:"leap_indicator"`
+	Version        uint8  `ch:"version"`
+	Mode           uint8  `ch:"mode"`
+	Stratum        uint8  `ch:"stratum"`
+	Poll           int8   `ch:"poll"`
+	Precision      int8   `ch:"precision"`
 	RootDelay      uint32 `ch:"root_delay"`
 	RootDispersion uint32 `ch:"root_dispersion"`
 	ReferenceID    uint32 `ch:"reference_id"`

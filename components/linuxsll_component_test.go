@@ -73,7 +73,7 @@ func TestLinuxSLLReconstructEmpty(t *testing.T) {
 
 func TestLinuxSLLReconstructLenMismatch(t *testing.T) {
 	comp := &LinuxSLLComponent{
-		L2Len:    20, // claims 20 bytes
+		L2Len:    20,                       // claims 20 bytes
 		L2HdrRaw: []byte{0x01, 0x02, 0x03}, // only 3 bytes
 	}
 	if err := comp.Reconstruct(&DecodeContext{}); err == nil {

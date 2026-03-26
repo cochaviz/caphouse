@@ -97,7 +97,7 @@ type config struct {
 	toTime        time.Time
 	debug         bool
 	silent        bool
-	noStreams      bool
+	noStreams     bool
 }
 
 func main() {
@@ -157,7 +157,7 @@ func rootCmd() *cobra.Command {
 				components:    splitComponents(componentsRaw),
 				debug:         debug,
 				silent:        silent,
-				noStreams:      noStreams,
+				noStreams:     noStreams,
 			}
 			if fromStr != "" {
 				t, err := time.Parse(time.RFC3339, fromStr)
@@ -556,4 +556,3 @@ func openSource(filePath string, logger *slog.Logger) (io.Reader, int64, uint64,
 
 	return f, fileSize, sessionID, nil
 }
-

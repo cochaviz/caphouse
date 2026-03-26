@@ -160,7 +160,6 @@ func newLogger(debug, silent bool) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 }
 
-
 // newClient constructs a caphouse.Client from a CLI config.
 func newClient(ctx context.Context, cfg config, logger *slog.Logger) (*caphouse.Client, error) {
 	return caphouse.New(ctx, caphouse.Config{

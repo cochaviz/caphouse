@@ -15,22 +15,22 @@ var ethernetSchemaSQL string
 
 // EthernetComponent stores raw ethernet header bytes.
 type EthernetComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
-	SrcMAC    []byte `ch:"src"`
-	DstMAC    []byte `ch:"dst"`
-	EtherType uint16 `ch:"type"`
-	Length    uint16 `ch:"len"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
+	SrcMAC       []byte `ch:"src"`
+	DstMAC       []byte `ch:"dst"`
+	EtherType    uint16 `ch:"type"`
+	Length       uint16 `ch:"len"`
 }
 
-func (c *EthernetComponent) Kind() uint        { return ComponentEthernet }
-func (c *EthernetComponent) Table() string     { return "pcap_ethernet" }
-func (c *EthernetComponent) Order() uint       { return OrderL2Base }
-func (c *EthernetComponent) Index() uint16     { return 0 }
-func (c *EthernetComponent) SetIndex(_ uint16) {}
-func (c *EthernetComponent) HeaderLen() int    { return 14 }
+func (c *EthernetComponent) Kind() uint           { return ComponentEthernet }
+func (c *EthernetComponent) Table() string        { return "pcap_ethernet" }
+func (c *EthernetComponent) Order() uint          { return OrderL2Base }
+func (c *EthernetComponent) Index() uint16        { return 0 }
+func (c *EthernetComponent) SetIndex(_ uint16)    {}
+func (c *EthernetComponent) HeaderLen() int       { return 14 }
 func (c *EthernetComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *EthernetComponent) ClickhouseColumns() ([]string, error) {

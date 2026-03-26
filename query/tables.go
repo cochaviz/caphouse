@@ -4,8 +4,8 @@ package query
 // when building filter queries. Construct one from a [caphouse.Client] via its
 // Tables() method.
 type Tables struct {
-	Packets    string // e.g. "`mydb`.`pcap_packets`"
-	Captures   string // e.g. "`mydb`.`pcap_captures`"
+	Packets    string                   // e.g. "`mydb`.`pcap_packets`"
+	Captures   string                   // e.g. "`mydb`.`pcap_captures`"
 	Components map[string]ComponentInfo // keyed by alias, e.g. "ipv4", "tcp"
 }
 

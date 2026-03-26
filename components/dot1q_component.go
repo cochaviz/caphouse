@@ -14,24 +14,24 @@ var dot1qSchemaSQL string
 
 // Dot1QComponent stores one vlan tag (repeatable).
 type Dot1QComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
-	TagIndex     uint16    `ch:"tag_index"`
-	Priority     uint8     `ch:"priority"`
-	DropEligible uint8     `ch:"drop_eligible"`
-	VLANID       uint16    `ch:"vlan_id"`
-	EtherType    uint16    `ch:"type"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
+	TagIndex     uint16 `ch:"tag_index"`
+	Priority     uint8  `ch:"priority"`
+	DropEligible uint8  `ch:"drop_eligible"`
+	VLANID       uint16 `ch:"vlan_id"`
+	EtherType    uint16 `ch:"type"`
 }
 
-func (c *Dot1QComponent) Kind() uint              { return ComponentDot1Q }
-func (c *Dot1QComponent) Table() string           { return "pcap_dot1q" }
-func (c *Dot1QComponent) Order() uint             { return OrderL2Tag }
-func (c *Dot1QComponent) Index() uint16           { return c.TagIndex }
-func (c *Dot1QComponent) SetIndex(index uint16)   { c.TagIndex = index }
-func (c *Dot1QComponent) HeaderLen() int          { return 4 }
-func (c *Dot1QComponent) FetchOrderBy() string    { return "packet_id, tag_index" }
+func (c *Dot1QComponent) Kind() uint            { return ComponentDot1Q }
+func (c *Dot1QComponent) Table() string         { return "pcap_dot1q" }
+func (c *Dot1QComponent) Order() uint           { return OrderL2Tag }
+func (c *Dot1QComponent) Index() uint16         { return c.TagIndex }
+func (c *Dot1QComponent) SetIndex(index uint16) { c.TagIndex = index }
+func (c *Dot1QComponent) HeaderLen() int        { return 4 }
+func (c *Dot1QComponent) FetchOrderBy() string  { return "packet_id, tag_index" }
 
 func (c *Dot1QComponent) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)

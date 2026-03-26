@@ -33,10 +33,10 @@ const (
 // options_raw holds raw bytes 20..data_offset*4 from the original header,
 // enabling bit-perfect frame reconstruction without checksum recomputation.
 type TCPComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
 
 	SrcPort    uint16 `ch:"src"`
 	DstPort    uint16 `ch:"dst"`

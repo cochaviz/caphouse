@@ -15,12 +15,12 @@ var linuxsllSchemaSQL string
 
 // LinuxSLLComponent stores raw SLL header bytes.
 type LinuxSLLComponent struct {
-	SessionID    uint64    `ch:"session_id"`
-	Ts           int64     `ch:"ts"`
-	PacketID  uint32 `ch:"packet_id"`
-	CodecVersion uint16    `ch:"codec_version"`
-	L2Len        uint16    `ch:"l2_len"`
-	L2HdrRaw     []byte    `ch:"l2_hdr_raw"`
+	SessionID    uint64 `ch:"session_id"`
+	Ts           int64  `ch:"ts"`
+	PacketID     uint32 `ch:"packet_id"`
+	CodecVersion uint16 `ch:"codec_version"`
+	L2Len        uint16 `ch:"l2_len"`
+	L2HdrRaw     []byte `ch:"l2_hdr_raw"`
 }
 
 func (c *LinuxSLLComponent) Kind() uint           { return ComponentLinuxSLL }

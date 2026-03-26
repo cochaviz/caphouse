@@ -49,10 +49,10 @@
 //     these are required by the schema conventions:
 //
 //     type MyComponent struct {
-//         CaptureID    uuid.UUID `ch:"capture_id"`
-//         PacketID     uint64    `ch:"packet_id"`
-//         CodecVersion uint16    `ch:"codec_version"`
-//         // ... protocol fields
+//     CaptureID    uuid.UUID `ch:"capture_id"`
+//     PacketID     uint64    `ch:"packet_id"`
+//     CodecVersion uint16    `ch:"codec_version"`
+//     // ... protocol fields
 //     }
 //
 //  2. Implement the [Component] interface. The ClickHouse column/value methods
@@ -60,10 +60,10 @@
 //     which use struct field tags via reflection:
 //
 //     func (c *MyComponent) ClickhouseColumns() ([]string, error) {
-//         return GetClickhouseColumnsFrom(c)
+//     return GetClickhouseColumnsFrom(c)
 //     }
 //     func (c *MyComponent) ClickhouseValues() ([]any, error) {
-//         return GetClickhouseValuesFrom(c)
+//     return GetClickhouseValuesFrom(c)
 //     }
 //
 //  3. Write the ClickHouse schema as an embedded SQL file
@@ -73,7 +73,7 @@
 //     var mySchemaSQL string
 //
 //     func (c *MyComponent) Schema(table string) string {
-//         return applySchema(mySchemaSQL, table)
+//     return applySchema(mySchemaSQL, table)
 //     }
 //
 //  4. Register the component in [ComponentFactories] and [LayerEncoders]:
