@@ -68,7 +68,7 @@ func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string
 		t.Fatalf("ingest %s: ParseGlobalHeader: %v", filename, err)
 	}
 	meta.CaptureID = uuid.New()
-	meta.SensorID = "test"
+	meta.Sensor = "test"
 
 	r, err := pcapgo.NewReader(bytes.NewReader(pcapData))
 	if err != nil {

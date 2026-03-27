@@ -224,3 +224,85 @@ func TestParse_CombinedAliasAndLiteral(t *testing.T) {
 		t.Errorf("literal tcp.dst missing in: %s", got)
 	}
 }
+
+func TestParse_FieldAlias_ARPMac(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			"arp.mac = 'aa:bb:cc:dd:ee:ff'",
+			"(arp.sender_mac = 'aa:bb:cc:dd:ee:ff' or arp.target_mac = 'aa:bb:cc:dd:ee:ff')",
+		},
+		{
+			"arp.mac != 'aa:bb:cc:dd:ee:ff'",
+			"(arp.sender_mac != 'aa:bb:cc:dd:ee:ff' and arp.target_mac != 'aa:bb:cc:dd:ee:ff')",
+		},
+		{
+			"arp.mac in ('aa:bb:cc:dd:ee:ff', '11:22:33:44:55:66')",
+			"(arp.sender_mac in ('aa:bb:cc:dd:ee:ff', '11:22:33:44:55:66') or arp.target_mac in ('aa:bb:cc:dd:ee:ff', '11:22:33:44:55:66'))",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseClause(t, tt.input)
+			if got != tt.want {
+				t.Errorf("got  %s\nwant %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParse_PacketFieldRewrite(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"packet.incl_len > 1000", "p.incl_len > 1000"},
+		{"packet.ts > 0", "p.ts > 0"},
+		{"packet.packet_id = 42", "p.packet_id = 42"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseClause(t, tt.input)
+			if got != tt.want {
+				t.Errorf("got  %s\nwant %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParse_CaptureSensor(t *testing.T) {
+	f, err := Parse("capture.sensor = 'myhost'")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if f.Clause != "captures.sensor = 'myhost'" {
+		t.Errorf("clause: got %q, want %q", f.Clause, "captures.sensor = 'myhost'")
+	}
+	if !f.captures {
+		t.Error("captures flag not set for capture.sensor filter")
+	}
+	if len(f.Components()) != 0 {
+		t.Errorf("expected no component JOINs, got %v", f.Components())
+	}
+}
+
+func TestParse_CaptureSensor_Combined(t *testing.T) {
+	// capture.sensor combined with a component field — both the captures JOIN and
+	// the component JOIN must be registered.
+	f, err := Parse("capture.sensor = 'edge01' and tcp.dst = 443")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(f.Clause, "captures.sensor = 'edge01'") {
+		t.Errorf("sensor rewrite missing in clause: %s", f.Clause)
+	}
+	if !f.captures {
+		t.Error("captures flag not set")
+	}
+	comps := f.Components()
+	if len(comps) != 1 || comps[0] != "tcp" {
+		t.Errorf("expected [tcp], got %v", comps)
+	}
+}
