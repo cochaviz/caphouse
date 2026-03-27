@@ -23,7 +23,7 @@ var errUnsupportedMagic = errors.New("unsupported pcap magic")
 // CaptureMeta describes one stored session's global metadata.
 type CaptureMeta struct {
 	SessionID      uint64
-	SensorID       string
+	Sensor         string
 	Snaplen        uint32
 	LinkType       uint32 // DLT, for Ethernet use 1
 	Endianness     string // "le" or "be"
@@ -41,7 +41,7 @@ func (CaptureMeta) Table() string { return "pcap_captures" }
 // ClickhouseColumns implements clickhouseMapper.
 func (CaptureMeta) ClickhouseColumns() ([]string, error) {
 	return []string{
-		"session_id", "sensor_id",
+		"session_id", "sensor",
 		"endianness", "snaplen", "linktype", "time_res",
 		"global_header_raw", "codec_version", "codec_profile",
 	}, nil
@@ -55,7 +55,7 @@ func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 		raw = []byte{}
 	}
 	return []any{
-		m.SessionID, m.SensorID,
+		m.SessionID, m.Sensor,
 		m.Endianness, m.Snaplen, m.LinkType, m.TimeResolution,
 		raw, m.CodecVersion, m.CodecProfile,
 	}, nil
@@ -64,7 +64,7 @@ func (m CaptureMeta) ClickhouseValues() ([]any, error) {
 // ScanColumns implements clickhouseMapper.
 func (CaptureMeta) ScanColumns() []string {
 	return []string{
-		"session_id", "sensor_id",
+		"session_id", "sensor",
 		"endianness", "snaplen", "linktype", "time_res",
 		"global_header_raw", "codec_version", "codec_profile",
 	}
@@ -120,7 +120,7 @@ func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
 	var m CaptureMeta
 	var headerRaw string
 	if err := scan(
-		&m.SessionID, &m.SensorID,
+		&m.SessionID, &m.Sensor,
 		&m.Endianness, &m.Snaplen, &m.LinkType, &m.TimeResolution,
 		&headerRaw,
 		&m.CodecVersion, &m.CodecProfile,

@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
   session_id       UInt64,
-  sensor_id        LowCardinality(String),
+  sensor           LowCardinality(String),
   endianness       Enum8('le' = 1, 'be' = 2),
   snaplen          UInt32,
   linktype         UInt32,

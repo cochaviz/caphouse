@@ -139,8 +139,11 @@ func (c *Client) QueryPacketComponents(ctx context.Context, sessionID uint64, pa
 		"p.incl_len + p.trunc_extra AS orig_len",
 		"toUInt64(p.components) AS components",
 		"lower(hex(p.payload)) AS payload",
+		"captures.sensor AS sensor",
 	}
-	var joins []string
+	joins := []string{
+		fmt.Sprintf("LEFT JOIN %s AS captures ON captures.session_id = p.session_id", c.capturesTable()),
+	}
 	for _, kind := range components.KnownComponentKinds {
 		proto := components.ComponentFactories[kind]()
 		alias := proto.Name()

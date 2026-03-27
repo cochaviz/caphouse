@@ -189,7 +189,7 @@ func ingestPCAP(t *testing.T, ctx context.Context, pcapData []byte) uint64 {
 	h.Write(pcapData)
 	sessionID := binary.BigEndian.Uint64(h.Sum(nil)[0:8])
 	meta.SessionID = sessionID
-	meta.SensorID = "test"
+	meta.Sensor = "test"
 	meta.GlobalHeaderRaw = pcapData[:24]
 
 	if _, err := compressionClient.CreateCapture(ctx, meta); err != nil {

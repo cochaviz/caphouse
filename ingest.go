@@ -262,7 +262,7 @@ func (c *Client) IngestPCAPStream(
 	}
 
 	meta.SessionID = sessionID
-	meta.SensorID = sensor
+	meta.Sensor = sensor
 	meta.GlobalHeaderRaw = header
 
 	reader, err := pcapgo.NewReader(io.MultiReader(bytes.NewReader(header), br))
@@ -289,7 +289,7 @@ func (c *Client) ingestNgStream(
 		return 0, err
 	}
 	meta.SessionID = sessionID
-	meta.SensorID = sensor
+	meta.Sensor = sensor
 	return c.ingestPackets(ctx, meta, ngr, onPacket)
 }
 

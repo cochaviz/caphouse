@@ -11,7 +11,7 @@ import (
 type Config struct {
 	DSN           string // clickhouse connection string or host:port
 	Database      string
-	SensorID      string
+	Sensor        string
 	BatchSize     int // packets per batch (ingest) and export window
 	FlushInterval time.Duration
 	Debug         bool

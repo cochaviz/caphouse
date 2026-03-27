@@ -40,6 +40,12 @@ var (
 	// packetDotRe rewrites "packet." → "p." so callers can reference pcap_packets
 	// columns (e.g. packet.payload, packet.ts) without knowing the SQL alias.
 	packetDotRe = regexp.MustCompile(`\bpacket\.`)
+
+	// captureSensorRe matches capture.sensor (which lives in pcap_captures, not
+	// pcap_packets) so it can be rewritten to the SQL alias before execution.
+	// The table is aliased as "captures" to match the naming convention used for
+	// component tables (ipv4, tcp, dns, …).
+	captureSensorRe = regexp.MustCompile(`\bcapture\.sensor\b`)
 )
 
 func init() {
@@ -177,6 +183,10 @@ type Filter struct {
 
 	// components is the sorted, deduplicated list of component names referenced.
 	components []string
+
+	// captures is true when the filter references capture.sensor, requiring a
+	// JOIN with pcap_captures AS cap.
+	captures bool
 }
 
 // Components returns the sorted list of component table aliases referenced by
@@ -189,8 +199,13 @@ func (f Filter) Components() []string { return f.components }
 //
 // An empty clause is valid and selects all packets (subject to sessionIDs).
 func Parse(clause string) (Filter, error) {
+	// Rewrite "capture.sensor" → "cap.sensor" before the generic packet. pass,
+	// since sensor lives in pcap_captures (aliased as "cap"), not pcap_packets.
+	needsCaptures := captureSensorRe.MatchString(clause)
+	expanded := captureSensorRe.ReplaceAllString(clause, "captures.sensor")
+
 	// Rewrite "packet." → "p." so callers can use packet.payload, packet.ts, etc.
-	expanded := packetDotRe.ReplaceAllString(clause, "p.")
+	expanded = packetDotRe.ReplaceAllString(expanded, "p.")
 
 	// Expand field aliases (e.g., ipv4.addr = '1.1.1.1').
 	expanded = expandFieldAliases(expanded)
@@ -220,6 +235,7 @@ func Parse(clause string) (Filter, error) {
 	return Filter{
 		Clause:     strings.TrimSpace(expanded),
 		components: comps,
+		captures:   needsCaptures,
 	}, nil
 }
 
@@ -255,6 +271,11 @@ func (f Filter) IDsSQL(
 		sb.WriteString(" AS ")
 		sb.WriteString(comp)
 		sb.WriteString(" USING (session_id, packet_id)")
+	}
+	if f.captures {
+		sb.WriteString("\nINNER JOIN ")
+		sb.WriteString(tableRef("pcap_captures"))
+		sb.WriteString(" AS captures USING (session_id)")
 	}
 
 	var conditions []string
@@ -401,6 +422,11 @@ func (f Filter) CountsSQL(tableRef func(string) string, packets string, sessionI
 		sb.WriteString(" AS ")
 		sb.WriteString(comp)
 		sb.WriteString(" USING (session_id, packet_id)")
+	}
+	if f.captures {
+		sb.WriteString("\nINNER JOIN ")
+		sb.WriteString(tableRef("pcap_captures"))
+		sb.WriteString(" AS captures USING (session_id)")
 	}
 
 	var conditions []string

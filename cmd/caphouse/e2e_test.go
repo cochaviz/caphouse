@@ -177,7 +177,7 @@ func crashAfter(ctx context.Context, t *testing.T, pcapData []byte, filename str
 		t.Fatalf("crashAfter %q: parse header: %v", filename, err)
 	}
 	meta.SessionID = sessionID
-	meta.SensorID = "test"
+	meta.Sensor = "test"
 	meta.GlobalHeaderRaw = pcapData[:24]
 
 	if _, err := cliClient.CreateCapture(ctx, meta); err != nil {
