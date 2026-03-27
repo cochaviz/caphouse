@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -23,8 +22,8 @@ type LinuxSLLComponent struct {
 	L2HdrRaw     []byte `ch:"l2_hdr_raw"`
 }
 
-func (c *LinuxSLLComponent) Kind() uint           { return ComponentLinuxSLL }
-func (c *LinuxSLLComponent) Table() string        { return "pcap_linuxsll" }
+func (c *LinuxSLLComponent) Kind() uint   { return ComponentLinuxSLL }
+func (c *LinuxSLLComponent) Name() string { return "linuxsll" }
 func (c *LinuxSLLComponent) Order() uint          { return OrderL2Base }
 func (c *LinuxSLLComponent) Index() uint16        { return 0 }
 func (c *LinuxSLLComponent) SetIndex(_ uint16)    {}
@@ -62,14 +61,6 @@ func (c *LinuxSLLComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *LinuxSLLComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *LinuxSLLComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var raw string
-	c.SessionID = sessionID
-	err := rows.Scan(&c.PacketID, &c.L2Len, &raw)
-	c.L2HdrRaw = []byte(raw)
-	return c.PacketID, err
 }
 
 func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]Component, error) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -25,8 +24,8 @@ type EthernetComponent struct {
 	Length       uint16 `ch:"len"`
 }
 
-func (c *EthernetComponent) Kind() uint           { return ComponentEthernet }
-func (c *EthernetComponent) Table() string        { return "pcap_ethernet" }
+func (c *EthernetComponent) Kind() uint   { return ComponentEthernet }
+func (c *EthernetComponent) Name() string { return "ethernet" }
 func (c *EthernetComponent) Order() uint          { return OrderL2Base }
 func (c *EthernetComponent) Index() uint16        { return 0 }
 func (c *EthernetComponent) SetIndex(_ uint16)    {}
@@ -69,13 +68,6 @@ func (c *EthernetComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *EthernetComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var src, dst string
-	c.SessionID = sessionID
-	err := rows.Scan(&c.PacketID, &src, &dst, &c.EtherType, &c.Length)
-	c.SrcMAC, c.DstMAC = []byte(src), []byte(dst)
-	return c.PacketID, err
-}
 
 func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	eth, ok := layer.(*layers.Ethernet)
@@ -97,6 +89,7 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		Length:       eth.Length,
 	}}, nil
 }
+
 
 func (c *EthernetComponent) Schema(table string) string { return applySchema(ethernetSchemaSQL, table) }
 func (c *EthernetComponent) Indexes(_ string) []string  { return nil }

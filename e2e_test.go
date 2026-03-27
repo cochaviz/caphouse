@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,9 +85,14 @@ func TestE2ERoundtrip(t *testing.T) {
 				t.Fatalf("IngestPCAPStream: %v", err)
 			}
 
-			got, err := integrationClient.ExportCaptureBytes(ctx, sessionID)
+			rc, _, err := integrationClient.Export(ctx, ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				t.Fatalf("export: %v", err)
+			}
+			got, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("export read: %v", err)
 			}
 			if !bytes.Equal(got, pcapData) {
 				t.Fatalf("exported pcap does not match original (got %d bytes, want %d)", len(got), len(pcapData))

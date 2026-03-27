@@ -64,9 +64,9 @@ func (c *Client) InitSchema(ctx context.Context) error {
 
 	for _, ctor := range components.ComponentFactories {
 		proto := ctor()
-		table := c.tableRef(proto.Table())
+		table := c.tableRef(components.ComponentTable(proto))
 		if err := c.conn.Exec(ctx, proto.Schema(table)); err != nil {
-			return fmt.Errorf("create %s table: %w", proto.Table(), err)
+			return fmt.Errorf("create %s table: %w", proto.Name(), err)
 		}
 	}
 
@@ -82,7 +82,7 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	}
 	for _, ctor := range components.ComponentFactories {
 		proto := ctor()
-		indexes = append(indexes, proto.Indexes(c.tableRef(proto.Table()))...)
+		indexes = append(indexes, proto.Indexes(c.tableRef(components.ComponentTable(proto)))...)
 	}
 	indexes = append(indexes, streams.CapturesIndexes(streamCapturesTable)...)
 	indexes = append(indexes, streams.HTTPIndexes(streamHTTPTable)...)
@@ -112,7 +112,8 @@ func (c *Client) streamHTTPTable() string     { return c.tableRef("stream_http")
 // componentTable returns the fully-qualified table reference for the component
 // of the given kind, as registered in ComponentFactories.
 func (c *Client) componentTable(kind uint) string {
-	return c.tableRef(components.ComponentFactories[kind]().Table())
+	proto := components.ComponentFactories[kind]()
+	return c.tableRef(components.ComponentTable(proto))
 }
 
 func quoteIdent(name string) string {

@@ -79,7 +79,7 @@ type testComponent struct {
 func (testComponent) Kind() uint    { return 0 }
 func (testComponent) Order() uint   { return 0 }
 func (testComponent) Index() uint16 { return 0 }
-func (testComponent) Table() string { return "test_table" }
+func (testComponent) Name() string  { return "test_table" }
 func (c testComponent) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)
 }
@@ -98,7 +98,7 @@ type otherComponent struct {
 func (otherComponent) Kind() uint    { return 0 }
 func (otherComponent) Order() uint   { return 0 }
 func (otherComponent) Index() uint16 { return 0 }
-func (otherComponent) Table() string { return "other_table" }
+func (otherComponent) Name() string  { return "other_table" }
 func (c otherComponent) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)
 }
@@ -136,7 +136,7 @@ func TestCreateBatchBuildsQueryAndAppends(t *testing.T) {
 		t.Fatalf("CreateBatch returned nil batch")
 	}
 
-	wantQuery := "INSERT INTO test_table (capture_id, packet_id, optional) VALUES (?, ?, ?)"
+	wantQuery := "INSERT INTO pcap_test_table (capture_id, packet_id, optional) VALUES (?, ?, ?)"
 	if conn.query != wantQuery {
 		t.Fatalf("query mismatch: got %q want %q", conn.query, wantQuery)
 	}

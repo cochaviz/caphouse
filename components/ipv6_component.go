@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -34,8 +33,8 @@ type IPv6Component struct {
 	IPv6TrafficClass uint8  `ch:"traffic_class"`
 }
 
-func (c *IPv6Component) Kind() uint           { return ComponentIPv6 }
-func (c *IPv6Component) Table() string        { return "pcap_ipv6" }
+func (c *IPv6Component) Kind() uint   { return ComponentIPv6 }
+func (c *IPv6Component) Name() string { return "ipv6" }
 func (c *IPv6Component) Order() uint          { return OrderL3Base }
 func (c *IPv6Component) Index() uint16        { return 0 }
 func (c *IPv6Component) SetIndex(_ uint16)    {}
@@ -46,13 +45,8 @@ func (c *IPv6Component) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)
 }
 
-// ClickhouseValues overrides reflection to convert netip.Addr to strings.
 func (c *IPv6Component) ClickhouseValues() ([]any, error) {
-	return []any{
-		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.Protocol, ipv6String(c.SrcIP6), ipv6String(c.DstIP6),
-		c.IPv6PayloadLen, c.IPv6HopLimit, c.IPv6FlowLabel, c.IPv6TrafficClass,
-	}, nil
+	return GetClickhouseValuesFrom(c)
 }
 
 func (c *IPv6Component) ApplyNucleus(nucleus PacketNucleus) {
@@ -82,19 +76,6 @@ func (c *IPv6Component) Reconstruct(ctx *DecodeContext) error {
 
 func (c *IPv6Component) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *IPv6Component) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var src, dst string
-	c.SessionID = sessionID
-	err := rows.Scan(
-		&c.PacketID, &c.Protocol,
-		&src, &dst,
-		&c.IPv6PayloadLen, &c.IPv6HopLimit, &c.IPv6FlowLabel, &c.IPv6TrafficClass,
-	)
-	c.SrcIP6, _ = netip.ParseAddr(src)
-	c.DstIP6, _ = netip.ParseAddr(dst)
-	return c.PacketID, err
 }
 
 func (c *IPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {

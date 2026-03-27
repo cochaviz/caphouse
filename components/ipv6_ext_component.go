@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"errors"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 )
 
@@ -20,10 +19,15 @@ type IPv6ExtComponent struct {
 	ExtIndex     uint16 `ch:"ext_index"`
 	ExtType      uint16 `ch:"ext_type"`
 	ExtRaw       []byte `ch:"ext_raw"`
+
+	// export scan buffers — populated from groupArray CTE columns
+	exportExtIndex []uint16
+	exportExtType  []uint16
+	exportExtRaw   []string // groupArray of a String column yields []string
 }
 
-func (c *IPv6ExtComponent) Kind() uint           { return ComponentIPv6Ext }
-func (c *IPv6ExtComponent) Table() string        { return "pcap_ipv6_ext" }
+func (c *IPv6ExtComponent) Kind() uint   { return ComponentIPv6Ext }
+func (c *IPv6ExtComponent) Name() string { return "ipv6_ext" }
 func (c *IPv6ExtComponent) Order() uint          { return OrderL3Ext }
 func (c *IPv6ExtComponent) Index() uint16        { return c.ExtIndex }
 func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.ExtIndex = i }
@@ -69,14 +73,6 @@ func (c *IPv6ExtComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *IPv6ExtComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var raw string
-	c.SessionID = sessionID
-	err := rows.Scan(&c.PacketID, &c.ExtIndex, &c.ExtType, &raw)
-	c.ExtRaw = []byte(raw)
-	return c.PacketID, err
-}
-
 func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	contents := layer.LayerContents()
 	if len(contents) == 0 {
@@ -87,6 +83,26 @@ func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		ExtType:      uint16(layer.LayerType()),
 		ExtRaw:       copyBytes(contents),
 	}}, nil
+}
+
+func (c *IPv6ExtComponent) ExportScanTargets() []any {
+	// Order matches DataColumns("ipv6_ext"): ext_index, ext_type, ext_raw
+	// Each target is a slice that receives a groupArray result.
+	return []any{&c.exportExtIndex, &c.exportExtType, &c.exportExtRaw}
+}
+
+func (c *IPv6ExtComponent) ExportExpand(sessionID uint64, packetID uint32) []Component {
+	out := make([]Component, len(c.exportExtIndex))
+	for i := range c.exportExtIndex {
+		out[i] = &IPv6ExtComponent{
+			SessionID: sessionID,
+			PacketID:  packetID,
+			ExtIndex:  c.exportExtIndex[i],
+			ExtType:   c.exportExtType[i],
+			ExtRaw:    []byte(c.exportExtRaw[i]),
+		}
+	}
+	return out
 }
 
 func (c *IPv6ExtComponent) Schema(table string) string { return applySchema(ipv6ExtSchemaSQL, table) }

@@ -1,4 +1,4 @@
-package query
+package caphouse
 
 import (
 	"strings"
@@ -8,14 +8,14 @@ import (
 // parseClause is a convenience wrapper that returns just the expanded clause.
 func parseClause(t *testing.T, input string) string {
 	t.Helper()
-	q, err := ParseQuery(input)
+	f, err := Parse(input)
 	if err != nil {
-		t.Fatalf("ParseQuery(%q) unexpected error: %v", input, err)
+		t.Fatalf("Parse(%q) unexpected error: %v", input, err)
 	}
-	return q.Clause
+	return f.Clause
 }
 
-func TestParseQuery_FieldAlias_Equal(t *testing.T) {
+func TestParse_FieldAlias_Equal(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -56,7 +56,7 @@ func TestParseQuery_FieldAlias_Equal(t *testing.T) {
 	}
 }
 
-func TestParseQuery_FieldAlias_NotEqual(t *testing.T) {
+func TestParse_FieldAlias_NotEqual(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -97,7 +97,7 @@ func TestParseQuery_FieldAlias_NotEqual(t *testing.T) {
 	}
 }
 
-func TestParseQuery_FieldAlias_Func(t *testing.T) {
+func TestParse_FieldAlias_Func(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -130,7 +130,7 @@ func TestParseQuery_FieldAlias_Func(t *testing.T) {
 	}
 }
 
-func TestParseQuery_FieldAlias_Between(t *testing.T) {
+func TestParse_FieldAlias_Between(t *testing.T) {
 	got := parseClause(t, "tcp.port between 1024 and 65535")
 	want := "(tcp.src between 1024 and 65535 or tcp.dst between 1024 and 65535)"
 	if got != want {
@@ -138,7 +138,7 @@ func TestParseQuery_FieldAlias_Between(t *testing.T) {
 	}
 }
 
-func TestParseQuery_FieldAlias_In(t *testing.T) {
+func TestParse_FieldAlias_In(t *testing.T) {
 	got := parseClause(t, "tcp.port in (80, 443, 8080)")
 	want := "(tcp.src in (80, 443, 8080) or tcp.dst in (80, 443, 8080))"
 	if got != want {
@@ -146,33 +146,27 @@ func TestParseQuery_FieldAlias_In(t *testing.T) {
 	}
 }
 
-func TestParseQuery_ShortName_Eth(t *testing.T) {
-	got := parseClause(t, "eth.src = 'aa:bb:cc:dd:ee:ff'")
-	if !strings.Contains(got, "ethernet.src") {
-		t.Errorf("expected eth to expand to ethernet, got: %s", got)
-	}
-}
 
-func TestParseQuery_BareComponent(t *testing.T) {
-	q, err := ParseQuery("dns")
+func TestParse_BareComponent(t *testing.T) {
+	f, err := Parse("dns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if q.Clause != "1 = 1" {
-		t.Errorf("bare component clause: got %q, want %q", q.Clause, "1 = 1")
+	if f.Clause != "1 = 1" {
+		t.Errorf("bare component clause: got %q, want %q", f.Clause, "1 = 1")
 	}
-	comps := q.Components()
+	comps := f.Components()
 	if len(comps) != 1 || comps[0] != "dns" {
 		t.Errorf("components: got %v, want [dns]", comps)
 	}
 }
 
-func TestParseQuery_Components_Detected(t *testing.T) {
-	q, err := ParseQuery("ipv4.dst = '1.1.1.1' and tcp.dst = 443")
+func TestParse_Components_Detected(t *testing.T) {
+	f, err := Parse("ipv4.dst = '1.1.1.1' and tcp.dst = 443")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	comps := q.Components()
+	comps := f.Components()
 	if len(comps) != 2 {
 		t.Fatalf("want 2 components, got %v", comps)
 	}
@@ -181,47 +175,47 @@ func TestParseQuery_Components_Detected(t *testing.T) {
 	}
 }
 
-func TestParseQuery_AliasComponents_Detected(t *testing.T) {
+func TestParse_AliasComponents_Detected(t *testing.T) {
 	// ipv4.addr alias must still register ipv4 as a required component.
-	q, err := ParseQuery("ipv4.addr != '10.0.0.1'")
+	f, err := Parse("ipv4.addr != '10.0.0.1'")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	comps := q.Components()
+	comps := f.Components()
 	if len(comps) != 1 || comps[0] != "ipv4" {
 		t.Errorf("want [ipv4], got %v", comps)
 	}
 }
 
-func TestParseQuery_UnknownComponent(t *testing.T) {
+func TestParse_UnknownComponent(t *testing.T) {
 	// Unrecognised component names are not matched by the component regex, so
 	// they pass through as-is with no error and no JOIN registered.
-	q, err := ParseQuery("bogus.field = 1")
+	f, err := Parse("bogus.field = 1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if q.Clause != "bogus.field = 1" {
-		t.Errorf("unexpected clause rewrite: %q", q.Clause)
+	if f.Clause != "bogus.field = 1" {
+		t.Errorf("unexpected clause rewrite: %q", f.Clause)
 	}
-	if len(q.Components()) != 0 {
-		t.Errorf("expected no components, got %v", q.Components())
+	if len(f.Components()) != 0 {
+		t.Errorf("expected no components, got %v", f.Components())
 	}
 }
 
-func TestParseQuery_Empty(t *testing.T) {
-	q, err := ParseQuery("")
+func TestParse_Empty(t *testing.T) {
+	f, err := Parse("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if q.Clause != "" {
-		t.Errorf("empty query: got %q, want empty string", q.Clause)
+	if f.Clause != "" {
+		t.Errorf("empty filter: got %q, want empty string", f.Clause)
 	}
-	if len(q.Components()) != 0 {
-		t.Errorf("empty query: got components %v, want none", q.Components())
+	if len(f.Components()) != 0 {
+		t.Errorf("empty filter: got components %v, want none", f.Components())
 	}
 }
 
-func TestParseQuery_CombinedAliasAndLiteral(t *testing.T) {
+func TestParse_CombinedAliasAndLiteral(t *testing.T) {
 	got := parseClause(t, "ipv4.addr != '10.0.0.1' and tcp.dst = 443")
 	if !strings.Contains(got, "ipv4.src != '10.0.0.1' and ipv4.dst != '10.0.0.1'") {
 		t.Errorf("ipv4.addr != not expanded correctly in: %s", got)

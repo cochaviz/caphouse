@@ -1,110 +1,96 @@
-// Package query provides a raw-SQL WHERE clause query type for filtering
-// network packet captures stored in ClickHouse.
-//
-// Users write standard ClickHouse SQL predicates referencing component tables
-// by name (e.g. ipv4.dst = '1.1.1.1', tcp.src = 80). The package detects
-// which component tables are needed and INNER JOINs them automatically.
-//
-// # Query syntax
-//
-// A query is a raw ClickHouse WHERE clause body. Component tables are
-// referenced as "component.field", e.g.:
-//
-//	ipv4.dst = '1.1.1.1' and udp.dst = 53
-//	tcp.flags & 2 != 0
-//	dns
-//
-// A bare component name (no dot) is a presence check: packets are filtered
-// to those that have that component (via INNER JOIN with no extra condition).
-//
-// # Aliases
-//
-// Short component name: eth → ethernet
-//
-// Field aliases that expand to src/dst pairs (= operator only):
-//
-//	ipv4.addr    → (ipv4.src = val OR ipv4.dst = val)
-//	ipv6.addr    → (ipv6.src = val OR ipv6.dst = val)
-//	tcp.port     → (tcp.src = val OR tcp.dst = val)
-//	udp.port     → (udp.src = val OR udp.dst = val)
-//	ethernet.mac → (ethernet.src = val OR ethernet.dst = val)
-package query
+package caphouse
 
 import (
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+
+	"caphouse/components"
 )
 
-// knownComponents is the set of valid component table aliases (pcap_ prefix stripped).
-var knownComponents = map[string]bool{
-	"ethernet": true,
-	"dot1q":    true,
-	"linuxsll": true,
-	"ipv4":     true,
-	"ipv6":     true,
-	"ipv6_ext": true,
-	"tcp":      true,
-	"udp":      true,
-	"dns":      true,
-	"ntp":      true,
-	"arp":      true,
-}
+// registryComponents is the set of valid component names, populated from the
+// component registry in init so it stays in sync automatically.
+var registryComponents map[string]bool
 
-// componentShortNames maps short aliases to canonical component names.
-var componentShortNames = map[string]string{
-	"eth": "ethernet",
-}
-
-// knownComponentList is the sorted list of canonical component names,
-// used in regex alternations. Must be longest-first to avoid partial matches.
-var knownComponentList = []string{
-	"ethernet", "linuxsll", "ipv6_ext", "dot1q", "ipv6", "ipv4",
-	"tcp", "udp", "dns", "ntp", "arp",
-}
-
-// Precompiled regexes.
+// Precompiled regexes, built in init from the registry.
 var (
-	// ethDotRe rewrites "eth." → "ethernet."
-	ethDotRe = regexp.MustCompile(`\beth\.`)
-	// ethBareRe rewrites bare "eth" → "ethernet" (not followed by dot or word char)
-	ethBareRe = regexp.MustCompile(`\beth\b`)
-
 	// fieldAliasRe matches component.alias = value or component.alias != value for expansion.
 	// Groups: 1=component, 2=alias, 3=operator (= or !=), 4=value
-	fieldAliasRe = regexp.MustCompile(
-		`\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s*(!=|=)\s*('[^']*'|[^\s)]+)`,
-	)
+	fieldAliasRe *regexp.Regexp
 
 	// betweenAliasRe matches component.alias BETWEEN lo AND hi.
 	// Groups: 1=component, 2=alias, 3=lo, 4=hi
-	betweenAliasRe = regexp.MustCompile(
-		`(?i)\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s+between\s+('[^']*'|[^\s]+)\s+and\s+('[^']*'|[^\s]+)`,
-	)
+	betweenAliasRe *regexp.Regexp
 
 	// inAliasRe matches component.alias IN (...).
 	// Groups: 1=component, 2=alias, 3=list contents
-	inAliasRe = regexp.MustCompile(
-		`(?i)\b(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s+in\s+\(([^)]+)\)`,
-	)
+	inAliasRe *regexp.Regexp
 
 	// funcAliasRe matches func(component.alias, ...) where the alias is the first argument.
 	// Groups: 1=function name, 2=component, 3=alias, 4=remaining arguments (after the comma)
-	funcAliasRe = regexp.MustCompile(
-		`(?i)\b(\w+)\(\s*(ethernet|ipv4|ipv6|tcp|udp|arp)\.(addr|port|mac|ip)\s*,\s*([^)]*)\)`,
-	)
+	funcAliasRe *regexp.Regexp
 
 	// componentDotRe extracts "component." prefixes from the clause.
-	componentDotRe = regexp.MustCompile(
-		`\b(ethernet|dot1q|linuxsll|ipv4|ipv6_ext|ipv6|tcp|udp|dns|ntp|arp)\.`,
-	)
+	componentDotRe *regexp.Regexp
 
 	// bareComponentRe matches standalone component names (no dot context checked separately).
-	bareComponentRe = regexp.MustCompile(
-		`\b(ethernet|dot1q|linuxsll|ipv4|ipv6_ext|ipv6|tcp|udp|dns|ntp|arp)\b`,
-	)
+	bareComponentRe *regexp.Regexp
+
+	// packetDotRe rewrites "packet." → "p." so callers can reference pcap_packets
+	// columns (e.g. packet.payload, packet.ts) without knowing the SQL alias.
+	packetDotRe = regexp.MustCompile(`\bpacket\.`)
 )
+
+func init() {
+	// Build registry set and name list.
+	registryComponents = make(map[string]bool, len(components.KnownComponentKinds))
+	names := make([]string, 0, len(components.KnownComponentKinds))
+	for _, kind := range components.KnownComponentKinds {
+		name := components.ComponentFactories[kind]().Name()
+		registryComponents[name] = true
+		names = append(names, name)
+	}
+
+	// Sort longest-first so the regex engine prefers the longer match (e.g.
+	// ipv6_ext before ipv6, linuxsll before any shorter name).
+	sort.Slice(names, func(i, j int) bool {
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
+	alt := strings.Join(names, "|")
+
+	componentDotRe = regexp.MustCompile(`\b(` + alt + `)\.`)
+	bareComponentRe = regexp.MustCompile(`\b(` + alt + `)\b`)
+
+	// Field alias regexes only cover components that have entries in
+	// fieldAliasExpansions. Derive the alternation from that map's keys.
+	faSet := make(map[string]bool)
+	for key := range fieldAliasExpansions {
+		faSet[key[:strings.Index(key, ".")]] = true
+	}
+	faNames := make([]string, 0, len(faSet))
+	for c := range faSet {
+		faNames = append(faNames, c)
+	}
+	sort.Strings(faNames)
+	fa := strings.Join(faNames, "|")
+
+	fieldAliasRe = regexp.MustCompile(
+		`\b(` + fa + `)\.(addr|port|mac|ip)\s*(!=|=)\s*('[^']*'|[^\s)]+)`,
+	)
+	betweenAliasRe = regexp.MustCompile(
+		`(?i)\b(` + fa + `)\.(addr|port|mac|ip)\s+between\s+('[^']*'|[^\s]+)\s+and\s+('[^']*'|[^\s]+)`,
+	)
+	inAliasRe = regexp.MustCompile(
+		`(?i)\b(` + fa + `)\.(addr|port|mac|ip)\s+in\s+\(([^)]+)\)`,
+	)
+	funcAliasRe = regexp.MustCompile(
+		`(?i)\b(\w+)\(\s*(` + fa + `)\.(addr|port|mac|ip)\s*,\s*([^)]*)\)`,
+	)
+}
 
 // fieldAliasExpansions maps "component.alias" to the two fields it expands to.
 var fieldAliasExpansions = map[string][2]string{
@@ -160,18 +146,13 @@ func ParseBreakdownFields(input string) ([]BreakdownField, error) {
 // caphouse.Client, which resolves it dynamically from the component registry.
 func ParseBreakdownField(field string) (BreakdownField, error) {
 	field = strings.TrimSpace(field)
-
-	// Apply eth short name
-	if strings.HasPrefix(field, "eth.") {
-		field = "ethernet" + field[3:]
-	}
 	dotIdx := strings.Index(field, ".")
 	if dotIdx < 0 {
 		return BreakdownField{}, fmt.Errorf("breakdown field must be in component.field format (e.g. ipv4.src), got %q", field)
 	}
 	comp := field[:dotIdx]
 	attr := field[dotIdx+1:]
-	if !knownComponents[comp] {
+	if !registryComponents[comp] {
 		return BreakdownField{}, fmt.Errorf("unknown component %q in breakdown field", comp)
 	}
 	// Check alias expansion
@@ -187,10 +168,10 @@ func ParseBreakdownField(field string) (BreakdownField, error) {
 	}, nil
 }
 
-// Query wraps a raw ClickHouse WHERE clause. Component tables referenced as
+// Filter wraps a raw ClickHouse WHERE clause. Component tables referenced as
 // "component.field" or as bare component names are detected and INNER JOINed
-// automatically when the query is executed.
-type Query struct {
+// automatically when the filter is executed.
+type Filter struct {
 	// Clause is the processed WHERE clause ready for embedding in SQL.
 	Clause string
 
@@ -199,19 +180,17 @@ type Query struct {
 }
 
 // Components returns the sorted list of component table aliases referenced by
-// this query. These are the tables that will be INNER JOINed when executing.
-func (q Query) Components() []string { return q.components }
+// this filter. These are the tables that will be INNER JOINed when executing.
+func (f Filter) Components() []string { return f.components }
 
-// ParseQuery parses a raw ClickHouse WHERE clause and prepares it for
-// execution. It applies component name aliases (eth→ethernet), expands field
-// aliases (ipv4.addr, udp.port, etc.), and detects which component tables
-// must be INNER JOINed.
+// Parse parses a raw ClickHouse WHERE clause and prepares it for execution.
+// It expands field aliases (ipv4.addr, udp.port, etc.) and detects which
+// component tables must be INNER JOINed.
 //
-// An empty clause is valid and selects all packets (subject to captureIDs).
-func ParseQuery(clause string) (Query, error) {
-	// Apply short name aliases (eth → ethernet).
-	expanded := ethDotRe.ReplaceAllString(clause, "ethernet.")
-	expanded = ethBareRe.ReplaceAllString(expanded, "ethernet")
+// An empty clause is valid and selects all packets (subject to sessionIDs).
+func Parse(clause string) (Filter, error) {
+	// Rewrite "packet." → "p." so callers can use packet.payload, packet.ts, etc.
+	expanded := packetDotRe.ReplaceAllString(clause, "p.")
 
 	// Expand field aliases (e.g., ipv4.addr = '1.1.1.1').
 	expanded = expandFieldAliases(expanded)
@@ -227,92 +206,119 @@ func ParseQuery(clause string) (Query, error) {
 
 	// Validate.
 	for c := range compSet {
-		if !knownComponents[c] {
-			return Query{}, fmt.Errorf("unknown component %q in query", c)
+		if !registryComponents[c] {
+			return Filter{}, fmt.Errorf("unknown component %q in filter", c)
 		}
 	}
 
-	components := make([]string, 0, len(compSet))
+	comps := make([]string, 0, len(compSet))
 	for c := range compSet {
-		components = append(components, c)
+		comps = append(comps, c)
 	}
-	sort.Strings(components)
+	sort.Strings(comps)
 
-	return Query{
+	return Filter{
 		Clause:     strings.TrimSpace(expanded),
-		components: components,
+		components: comps,
 	}, nil
 }
 
-// Subquery returns a SQL fragment selecting (session_id, packet_id) rows that
-// match this query. It can be embedded in a larger query via IN (...).
-func (q Query) Subquery(t Tables, sessionIDs []uint64) (string, []any, error) {
-	if err := q.validateComponents(t); err != nil {
-		return "", nil, err
+// IDsSQL returns a SQL SELECT (session_id, packet_id) fragment that can be
+// used as a subquery or executed directly as a streaming cursor.
+//
+// When limit > 0 the query includes ORDER BY ts and LIMIT/OFFSET, producing a
+// paginated set (viewing mode). When limit == 0 there is no LIMIT clause and
+// the caller is responsible for ordering (streaming/export mode).
+//
+// fromNs and toNs are optional Unix-nanosecond time bounds (0 = unset).
+// asc controls the ORDER BY direction; ignored when limit == 0.
+func (f Filter) IDsSQL(
+	tableRef func(string) string,
+	packets string,
+	sessionIDs []uint64,
+	limit, offset int,
+	fromNs, toNs int64,
+	asc bool,
+) (string, error) {
+	if err := f.validateComponents(); err != nil {
+		return "", err
 	}
 
 	var sb strings.Builder
 	sb.WriteString("SELECT p.session_id, p.packet_id\nFROM ")
-	sb.WriteString(t.Packets)
+	sb.WriteString(packets)
 	sb.WriteString(" AS p")
 
-	for _, comp := range q.components {
-		info := t.Components[comp]
+	for _, comp := range f.components {
 		sb.WriteString("\nINNER JOIN ")
-		sb.WriteString(info.TableRef)
+		sb.WriteString(tableRef("pcap_" + comp))
 		sb.WriteString(" AS ")
-		sb.WriteString(info.Alias)
+		sb.WriteString(comp)
 		sb.WriteString(" USING (session_id, packet_id)")
 	}
 
 	var conditions []string
 	if len(sessionIDs) > 0 {
-		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
+		conditions = append(conditions, "p."+sessionInSQL(sessionIDs))
 	}
-	if q.Clause != "" {
-		conditions = append(conditions, q.Clause)
+	if f.Clause != "" {
+		conditions = append(conditions, f.Clause)
+	}
+	if fromNs != 0 || toNs != 0 {
+		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
 	}
 	if len(conditions) > 0 {
 		sb.WriteString("\nWHERE ")
 		sb.WriteString(strings.Join(conditions, " AND "))
 	}
+	if limit > 0 {
+		if asc {
+			sb.WriteString("\nORDER BY p.ts ASC")
+		} else {
+			sb.WriteString("\nORDER BY p.ts DESC")
+		}
+	}
 	sb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
+	if limit > 0 {
+		sb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
+		if offset > 0 {
+			sb.WriteString(fmt.Sprintf(" OFFSET %d", offset))
+		}
+	}
 
-	return sb.String(), nil, nil
+	return sb.String(), nil
 }
 
 // SQL generates a full SELECT statement equivalent to this filter, with bind
 // parameters inlined. It selects p.* from pcap_packets plus any requested
 // component columns via LEFT JOIN.
-func (q Query) SQL(t Tables, sessionIDs []uint64, comps []string) (string, error) {
-	if err := q.validateComponents(t); err != nil {
+func (f Filter) SQL(tableRef func(string) string, packets string, sessionIDs []uint64, comps []string) (string, error) {
+	if err := f.validateComponents(); err != nil {
 		return "", err
 	}
 	for _, comp := range comps {
-		if _, ok := t.Components[comp]; !ok {
+		if !registryComponents[comp] {
 			return "", fmt.Errorf("unknown component %q", comp)
 		}
 	}
 
-	sub, _, err := q.Subquery(t, sessionIDs)
+	sub, err := f.IDsSQL(tableRef, packets, sessionIDs, 0, 0, 0, 0, false)
 	if err != nil {
 		return "", err
 	}
 
 	selectParts := []string{"p.*"}
 	for _, comp := range comps {
-		info := t.Components[comp]
 		selectParts = append(selectParts,
-			fmt.Sprintf("%s.* EXCEPT (session_id, packet_id, codec_version)", info.Alias),
+			fmt.Sprintf("%s.* EXCEPT (session_id, packet_id, codec_version)", comp),
 		)
 	}
 
-	fromClause := fmt.Sprintf("FROM %s AS p", t.Packets)
+	fromClause := fmt.Sprintf("FROM %s AS p", packets)
 	var joins []string
 	for _, comp := range comps {
-		info := t.Components[comp]
 		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s USING (session_id, packet_id)", info.TableRef, info.Alias),
+			fmt.Sprintf("LEFT JOIN %s AS %s USING (session_id, packet_id)", tableRef("pcap_"+comp), comp),
 		)
 	}
 
@@ -332,110 +338,6 @@ func (q Query) SQL(t Tables, sessionIDs []uint64, comps []string) (string, error
 	return sb.String(), nil
 }
 
-// SearchSQL generates the SQL used by the JSON search API.
-// fromNs and toNs are optional Unix-nanosecond bounds on the absolute packet
-// timestamp (0 = unset). When set, only packets within [fromNs, toNs] are returned.
-//
-// The query is executed in two phases:
-//  1. An inner subquery resolves the paginated (session_id, packet_id) set using
-//     only the filter-condition INNER JOINs, with ORDER BY + LIMIT/OFFSET applied
-//     before any display columns are fetched. This keeps the paginated set small.
-//  2. The outer query LEFT JOINs the requested display components only for those
-//     N rows, avoiding expensive joins across the full matching set.
-func (q Query) SearchSQL(t Tables, sessionIDs []uint64, comps []string, limit, offset int, fromNs, toNs int64, asc bool) (string, error) {
-	if err := q.validateComponents(t); err != nil {
-		return "", err
-	}
-	for _, comp := range comps {
-		if _, ok := t.Components[comp]; !ok {
-			return "", fmt.Errorf("unknown component %q", comp)
-		}
-	}
-
-	// ── Phase 1: paginated ID subquery ─────────────────────────────────────
-	// Uses INNER JOINs for filter conditions only. ORDER BY + time filter +
-	// LIMIT/OFFSET are applied here so the subquery produces at most N rows.
-	var idSb strings.Builder
-	idSb.WriteString("SELECT p.session_id, p.packet_id\nFROM ")
-	idSb.WriteString(t.Packets)
-	idSb.WriteString(" AS p")
-	for _, comp := range q.components {
-		info := t.Components[comp]
-		idSb.WriteString("\nINNER JOIN ")
-		idSb.WriteString(info.TableRef)
-		idSb.WriteString(" AS ")
-		idSb.WriteString(info.Alias)
-		idSb.WriteString(" USING (session_id, packet_id)")
-	}
-	var conditions []string
-	if len(sessionIDs) > 0 {
-		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
-	}
-	if q.Clause != "" {
-		conditions = append(conditions, q.Clause)
-	}
-	if fromNs != 0 || toNs != 0 {
-		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
-	}
-	if len(conditions) > 0 {
-		idSb.WriteString("\nWHERE ")
-		idSb.WriteString(strings.Join(conditions, " AND "))
-	}
-	if asc {
-		idSb.WriteString("\nORDER BY p.ts ASC")
-	} else {
-		idSb.WriteString("\nORDER BY p.ts DESC")
-	}
-	idSb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
-	if limit > 0 {
-		idSb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
-	}
-	if offset > 0 {
-		idSb.WriteString(fmt.Sprintf(" OFFSET %d", offset))
-	}
-
-	// ── Phase 2: assemble display columns for those N rows ─────────────────
-	// LEFT JOINs the requested display components only for the paginated set.
-	selectParts := []string{
-		"p.session_id AS session_id",
-		"p.packet_id AS packet_id",
-		"p.ts AS timestamp_ns",
-		"p.incl_len AS incl_len",
-		"p.incl_len + p.trunc_extra AS orig_len",
-		"toUInt64(p.components) AS components",
-	}
-	for _, comp := range comps {
-		info := t.Components[comp]
-		selectParts = append(selectParts, info.Columns...)
-	}
-	var joins []string
-	for _, comp := range comps {
-		info := t.Components[comp]
-		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
-				info.TableRef, info.Alias, info.Alias, info.Alias),
-		)
-	}
-
-	var sb strings.Builder
-	sb.WriteString("SELECT\n    ")
-	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
-	for _, j := range joins {
-		sb.WriteString("\n")
-		sb.WriteString(j)
-	}
-	sb.WriteString("\nWHERE (p.session_id, p.packet_id) IN (\n")
-	sb.WriteString(idSb.String())
-	sb.WriteString("\n)")
-	if asc {
-		sb.WriteString("\nORDER BY timestamp_ns ASC")
-	} else {
-		sb.WriteString("\nORDER BY timestamp_ns DESC")
-	}
-	return sb.String(), nil
-}
-
 // CountsSQL generates the SQL for a packet-count histogram.
 // fromNs and toNs are optional Unix-nanosecond bounds (0 = unset).
 // tzOffsetNs is the client's UTC offset in nanoseconds (e.g. 7200e9 for UTC+2),
@@ -446,8 +348,8 @@ func (q Query) SearchSQL(t Tables, sessionIDs []uint64, comps []string, limit, o
 // the ts column — the leading ORDER BY key — enabling a fast sparse-index range
 // scan. LIMIT 1 BY is omitted: for a histogram, approximate counts during the
 // brief pre-merge window of ReplacingMergeTree are acceptable.
-func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs, toNs int64, tzOffsetNs int64, breakdown []BreakdownField) (string, error) {
-	if err := q.validateComponents(t); err != nil {
+func (f Filter) CountsSQL(tableRef func(string) string, packets string, sessionIDs []uint64, binSizeNs int64, fromNs, toNs int64, tzOffsetNs int64, breakdown []BreakdownField) (string, error) {
+	if err := f.validateComponents(); err != nil {
 		return "", err
 	}
 
@@ -455,7 +357,6 @@ func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs,
 
 	var sb strings.Builder
 	if len(breakdown) > 0 {
-		// Build the breakdown value expression: single field or concat of multiple.
 		var bdExpr string
 		if len(breakdown) == 1 {
 			bdExpr = fmt.Sprintf("toString(%s)", breakdown[0].SQLExpr)
@@ -476,11 +377,11 @@ func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs,
 			binExpr,
 		))
 	}
-	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", t.Packets))
+	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", packets))
 
-	// Build sorted, deduplicated component list for JOINs
+	// Build sorted, deduplicated component list for JOINs.
 	compSet := make(map[string]bool)
-	for _, c := range q.components {
+	for _, c := range f.components {
 		compSet[c] = true
 	}
 	for _, bf := range breakdown {
@@ -495,20 +396,19 @@ func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs,
 	sort.Strings(joinComps)
 
 	for _, comp := range joinComps {
-		info := t.Components[comp]
 		sb.WriteString("\nINNER JOIN ")
-		sb.WriteString(info.TableRef)
+		sb.WriteString(tableRef("pcap_" + comp))
 		sb.WriteString(" AS ")
-		sb.WriteString(info.Alias)
+		sb.WriteString(comp)
 		sb.WriteString(" USING (session_id, packet_id)")
 	}
 
 	var conditions []string
 	if len(sessionIDs) > 0 {
-		conditions = append(conditions, "p."+SessionInSQL(sessionIDs))
+		conditions = append(conditions, "p."+sessionInSQL(sessionIDs))
 	}
-	if q.Clause != "" {
-		conditions = append(conditions, q.Clause)
+	if f.Clause != "" {
+		conditions = append(conditions, f.Clause)
 	}
 	if fromNs != 0 || toNs != 0 {
 		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
@@ -525,14 +425,23 @@ func (q Query) CountsSQL(t Tables, sessionIDs []uint64, binSizeNs int64, fromNs,
 	return sb.String(), nil
 }
 
-// validateComponents checks that all components referenced are present in Tables.
-func (q Query) validateComponents(t Tables) error {
-	for _, comp := range q.components {
-		if _, ok := t.Components[comp]; !ok {
+// validateComponents checks that all components referenced by this filter are in the registry.
+func (f Filter) validateComponents() error {
+	for _, comp := range f.components {
+		if !registryComponents[comp] {
 			return fmt.Errorf("component %q is not available in this context", comp)
 		}
 	}
 	return nil
+}
+
+// sessionInSQL returns a SQL IN predicate with session IDs inlined as integers.
+func sessionInSQL(ids []uint64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = fmt.Sprintf("%d", id)
+	}
+	return "session_id IN (" + strings.Join(parts, ",") + ")"
 }
 
 // expandFieldAliases rewrites field alias patterns (=, BETWEEN, IN) so that

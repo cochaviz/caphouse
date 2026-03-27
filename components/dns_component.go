@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -62,8 +61,8 @@ type DNSComponent struct {
 	AdditionalRdata []string `ch:"additional_rdata"`
 }
 
-func (c *DNSComponent) Kind() uint           { return ComponentDNS }
-func (c *DNSComponent) Table() string        { return "pcap_dns" }
+func (c *DNSComponent) Kind() uint   { return ComponentDNS }
+func (c *DNSComponent) Name() string { return "dns" }
 func (c *DNSComponent) Order() uint          { return OrderL7Base }
 func (c *DNSComponent) Index() uint16        { return 0 }
 func (c *DNSComponent) SetIndex(_ uint16)    {}
@@ -75,15 +74,7 @@ func (c *DNSComponent) ClickhouseColumns() ([]string, error) {
 }
 
 func (c *DNSComponent) ClickhouseValues() ([]any, error) {
-	return []any{
-		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.TransactionID, c.QR, c.Opcode, c.RCode, c.Flags,
-		c.ANCount, c.NSCount, c.ARCount,
-		c.QuestionsName, c.QuestionsType, c.QuestionsClass,
-		c.AnswersName, c.AnswersType, c.AnswersClass, c.AnswersTTL, c.AnswersRdata, c.AnswersIP,
-		c.AuthorityName, c.AuthorityType, c.AuthorityClass, c.AuthorityTTL, c.AuthorityRdata,
-		c.AdditionalName, c.AdditionalType, c.AdditionalClass, c.AdditionalTTL, c.AdditionalRdata,
-	}, nil
+	return GetClickhouseValuesFrom(c)
 }
 
 func (c *DNSComponent) ApplyNucleus(nucleus PacketNucleus) {
@@ -104,20 +95,6 @@ func (c *DNSComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *DNSComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *DNSComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	c.SessionID = sessionID
-	err := rows.Scan(
-		&c.PacketID,
-		&c.TransactionID, &c.QR, &c.Opcode, &c.RCode, &c.Flags,
-		&c.ANCount, &c.NSCount, &c.ARCount,
-		&c.QuestionsName, &c.QuestionsType, &c.QuestionsClass,
-		&c.AnswersName, &c.AnswersType, &c.AnswersClass, &c.AnswersTTL, &c.AnswersRdata, &c.AnswersIP,
-		&c.AuthorityName, &c.AuthorityType, &c.AuthorityClass, &c.AuthorityTTL, &c.AuthorityRdata,
-		&c.AdditionalName, &c.AdditionalType, &c.AdditionalClass, &c.AdditionalTTL, &c.AdditionalRdata,
-	)
-	return c.PacketID, err
 }
 
 func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {

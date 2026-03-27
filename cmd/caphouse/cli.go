@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"caphouse"
-	"caphouse/query"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
@@ -279,7 +278,7 @@ func splitComponents(raw string) []string {
 }
 
 func runExplain(cmd *cobra.Command, cfg config) error {
-	q, err := query.ParseQuery(cfg.queryExpr)
+	q, err := caphouse.Parse(cfg.queryExpr)
 	if err != nil {
 		return fmt.Errorf("parse filter: %w", err)
 	}
@@ -304,7 +303,7 @@ func runExplain(cmd *cobra.Command, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("--capture: %w", err)
 		}
-		sql, err = client.GenerateSQL(sessionID, q, cfg.components)
+		sql, err = client.GenerateSQLForSessions([]uint64{sessionID}, q, cfg.components)
 		if err != nil {
 			return err
 		}
@@ -424,7 +423,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 			"from", cfg.fromTime, "to", cfg.toTime)
 
 		var p ingestProgress
-		rc, totalPackets, err := client.ExportAllCapturesFiltered(ctx, cfg.fromTime, cfg.toTime, query.Query{}, &p.packets)
+		rc, totalPackets, err := client.Export(ctx, caphouse.ExportOpts{From: cfg.fromTime, To: cfg.toTime, PacketsWritten: &p.packets})
 		if err != nil {
 			return err
 		}
@@ -450,11 +449,11 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 	var totalPackets int64
 
 	if cfg.queryExpr != "" {
-		f, err := query.ParseQuery(cfg.queryExpr)
+		f, err := caphouse.Parse(cfg.queryExpr)
 		if err != nil {
 			return fmt.Errorf("parse filter: %w", err)
 		}
-		rc, totalPackets, err = client.ExportCaptureFiltered(ctx, sessionID, f, &p.packets)
+		rc, totalPackets, err = client.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID, Filter: f, PacketsWritten: &p.packets})
 		if err != nil {
 			return err
 		}
@@ -465,7 +464,7 @@ func runWrite(cmd *cobra.Command, cfg config) error {
 			logger.Warn("could not count packets", "err", err)
 			totalPackets = -1
 		}
-		rc, err = client.ExportCaptureWithProgress(ctx, sessionID, &p.packets)
+		rc, _, err = client.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID, PacketsWritten: &p.packets})
 		if err != nil {
 			return err
 		}

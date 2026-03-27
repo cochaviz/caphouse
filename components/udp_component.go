@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -27,8 +26,8 @@ type UDPComponent struct {
 	Checksum uint16 `ch:"checksum"`
 }
 
-func (c *UDPComponent) Kind() uint           { return ComponentUDP }
-func (c *UDPComponent) Table() string        { return "pcap_udp" }
+func (c *UDPComponent) Kind() uint   { return ComponentUDP }
+func (c *UDPComponent) Name() string { return "udp" }
 func (c *UDPComponent) Order() uint          { return OrderL4Base }
 func (c *UDPComponent) Index() uint16        { return 0 }
 func (c *UDPComponent) SetIndex(_ uint16)    {}
@@ -65,12 +64,6 @@ func (c *UDPComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *UDPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *UDPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	c.SessionID = sessionID
-	err := rows.Scan(&c.PacketID, &c.SrcPort, &c.DstPort, &c.Length, &c.Checksum)
-	return c.PacketID, err
 }
 
 func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {

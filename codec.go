@@ -96,7 +96,7 @@ func encodePacket(linkType uint32, p Packet) codecPacket {
 		return rawFrameFallback(nucleus, frame)
 	}
 	nucleus.TailOffset = uint16(tailOffset)
-	nucleus.FrameRaw = copyBytes(frame[tailOffset:])
+	nucleus.Payload = copyBytes(frame[tailOffset:])
 
 	for _, component := range componentList {
 		if component == nil {
@@ -117,10 +117,10 @@ func encodePacket(linkType uint32, p Packet) codecPacket {
 // Returns an error if a component's kind bit is not set in the nucleus mask.
 func reconstructFrame(nucleus components.PacketNucleus, comps []components.Component) ([]byte, error) {
 	if components.ComponentHas(nucleus.Components, components.ComponentRawFrame) {
-		if len(nucleus.FrameRaw) == 0 {
-			return nil, errors.New("raw frame bit set but frame_raw empty")
+		if len(nucleus.Payload) == 0 {
+			return nil, errors.New("raw frame bit set but payload empty")
 		}
-		return copyBytes(nucleus.FrameRaw), nil
+		return copyBytes(nucleus.Payload), nil
 	}
 
 	kindCounts := map[uint]int{}
@@ -179,8 +179,8 @@ func reconstructFrame(nucleus components.PacketNucleus, comps []components.Compo
 	if nucleus.TailOffset > 0 && int(nucleus.TailOffset) != ctx.Offset {
 		return nil, fmt.Errorf("tail_offset mismatch: %d != %d", nucleus.TailOffset, ctx.Offset)
 	}
-	if len(nucleus.FrameRaw) > 0 {
-		ctx.Layers = append(ctx.Layers, gopacket.Payload(nucleus.FrameRaw))
+	if len(nucleus.Payload) > 0 {
+		ctx.Layers = append(ctx.Layers, gopacket.Payload(nucleus.Payload))
 	}
 
 	if len(ctx.Layers) == 0 {
@@ -207,7 +207,7 @@ func rawFrameFallback(nucleus components.PacketNucleus, frame []byte) codecPacke
 		mask.SetBit(mask, int(components.ComponentHash), 1)
 	}
 	nucleus.Components = mask
-	nucleus.FrameRaw = frame
+	nucleus.Payload = frame
 	nucleus.TailOffset = 0
 	return codecPacket{Nucleus: nucleus}
 }

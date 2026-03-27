@@ -324,7 +324,7 @@ func TestCompressionRatio(t *testing.T) {
 
 // TestParseRatio ingests each PCAP in testdata/ and reports what fraction of
 // packets were fully parsed into component tables versus stored as raw frame
-// fallback bytes in pcap_packets.frame_raw.
+// fallback bytes in pcap_packets.payload.
 func TestParseRatio(t *testing.T) {
 	ctx := context.Background()
 	paths, err := filepath.Glob("testdata/*.pcap")
@@ -344,7 +344,7 @@ func TestParseRatio(t *testing.T) {
 
 			var total, rawCount uint64
 			rows, err := compressionClient.conn.Query(ctx, `
-				SELECT count(), countIf(length(frame_raw) > 0)
+				SELECT count(), countIf(length(payload) > 0)
 				FROM `+"`caphouse_compression`.`pcap_packets`"+` FINAL
 				WHERE session_id = ?`, captureID)
 			if err != nil {

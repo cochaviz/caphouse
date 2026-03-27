@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -50,8 +49,8 @@ type TCPComponent struct {
 	OptionsRaw []byte `ch:"options_raw"`
 }
 
-func (c *TCPComponent) Kind() uint           { return ComponentTCP }
-func (c *TCPComponent) Table() string        { return "pcap_tcp" }
+func (c *TCPComponent) Kind() uint   { return ComponentTCP }
+func (c *TCPComponent) Name() string { return "tcp" }
 func (c *TCPComponent) Order() uint          { return OrderL4Base }
 func (c *TCPComponent) Index() uint16        { return 0 }
 func (c *TCPComponent) SetIndex(_ uint16)    {}
@@ -100,20 +99,6 @@ func (c *TCPComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *TCPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *TCPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var optRaw string
-	c.SessionID = sessionID
-	err := rows.Scan(
-		&c.PacketID,
-		&c.SrcPort, &c.DstPort,
-		&c.Seq, &c.Ack,
-		&c.DataOffset, &c.Flags, &c.Window, &c.Checksum, &c.Urgent,
-		&optRaw,
-	)
-	c.OptionsRaw = []byte(optRaw)
-	return c.PacketID, err
 }
 
 func (c *TCPComponent) Encode(layer gopacket.Layer) ([]Component, error) {

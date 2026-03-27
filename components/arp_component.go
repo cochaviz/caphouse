@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -30,8 +29,8 @@ type ARPComponent struct {
 	TargetIP  net.IP  `ch:"target_ip"`
 }
 
-func (c *ARPComponent) Kind() uint           { return ComponentARP }
-func (c *ARPComponent) Table() string        { return "pcap_arp" }
+func (c *ARPComponent) Kind() uint   { return ComponentARP }
+func (c *ARPComponent) Name() string { return "arp" }
 func (c *ARPComponent) Order() uint          { return OrderL4Base }
 func (c *ARPComponent) Index() uint16        { return 0 }
 func (c *ARPComponent) SetIndex(_ uint16)    {}
@@ -39,17 +38,11 @@ func (c *ARPComponent) HeaderLen() int       { return 28 }
 func (c *ARPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *ARPComponent) ClickhouseColumns() ([]string, error) {
-	return []string{
-		"session_id", "ts", "packet_id", "codec_version",
-		"arp_op", "sender_mac", "sender_ip", "target_mac", "target_ip",
-	}, nil
+	return GetClickhouseColumnsFrom(c)
 }
 
 func (c *ARPComponent) ClickhouseValues() ([]any, error) {
-	return []any{
-		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.ArpOp, string(c.SenderMAC[:]), c.SenderIP, string(c.TargetMAC[:]), c.TargetIP,
-	}, nil
+	return GetClickhouseValuesFrom(c)
 }
 
 func (c *ARPComponent) ApplyNucleus(nucleus PacketNucleus) {
@@ -83,21 +76,6 @@ func (c *ARPComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *ARPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *ARPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	c.SessionID = sessionID
-	var senderMAC, targetMAC string
-	var senderIP, targetIP net.IP
-	err := rows.Scan(&c.PacketID, &c.ArpOp, &senderMAC, &senderIP, &targetMAC, &targetIP)
-	if err != nil {
-		return 0, err
-	}
-	copy(c.SenderMAC[:], senderMAC)
-	copy(c.TargetMAC[:], targetMAC)
-	c.SenderIP = senderIP
-	c.TargetIP = targetIP
-	return c.PacketID, nil
 }
 
 func (c *ARPComponent) Encode(layer gopacket.Layer) ([]Component, error) {

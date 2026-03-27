@@ -241,9 +241,14 @@ func TestE2EDuplicateIngest(t *testing.T) {
 			sessionID := ingestAll(ctx, t, pcapData, name)
 			ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
+			rc, _, err := cliClient.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				t.Fatalf("export: %v", err)
+			}
+			got, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("export read: %v", err)
 			}
 			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 		})
@@ -268,9 +273,14 @@ func TestE2EPartialCrashResume(t *testing.T) {
 			crashAfter(ctx, t, pcapData, name, total/2)
 			sessionID := ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
+			rc, _, err := cliClient.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				t.Fatalf("export: %v", err)
+			}
+			got, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("export read: %v", err)
 			}
 			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 		})
@@ -298,9 +308,14 @@ func TestE2EFlushBeforeCrash(t *testing.T) {
 			}
 			sessionID := ingestAll(ctx, t, pcapData, name)
 
-			got, err := cliClient.ExportCaptureBytes(ctx, sessionID)
+			rc, _, err := cliClient.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				t.Fatalf("export: %v", err)
+			}
+			got, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("export read: %v", err)
 			}
 			compareParsed(t, parsePackets(t, got), parsePackets(t, pcapData))
 		})
@@ -338,9 +353,14 @@ func TestE2EConcurrentRings(t *testing.T) {
 
 			var gotPkts []parsedPkt
 			for _, sid := range sessionIDs {
-				data, err := cliClient.ExportCaptureBytes(ctx, sid)
+				rc, _, err := cliClient.Export(ctx, caphouse.ExportOpts{SessionID: &sid})
 				if err != nil {
 					t.Fatalf("export session %d: %v", sid, err)
+				}
+				data, err := io.ReadAll(rc)
+				rc.Close()
+				if err != nil {
+					t.Fatalf("export read session %d: %v", sid, err)
 				}
 				gotPkts = append(gotPkts, parsePackets(t, data)...)
 			}
@@ -380,9 +400,14 @@ func TestE2EMonitorRings(t *testing.T) {
 			for i, ring := range rings {
 				ringName := fmt.Sprintf("ring%d.pcap", i)
 				sid := ingestAll(ctx, t, ring, ringName)
-				data, err := cliClient.ExportCaptureBytes(ctx, sid)
+				rc, _, err := cliClient.Export(ctx, caphouse.ExportOpts{SessionID: &sid})
 				if err != nil {
 					t.Fatalf("export ring %d: %v", i, err)
+				}
+				data, err := io.ReadAll(rc)
+				rc.Close()
+				if err != nil {
+					t.Fatalf("export ring read %d: %v", i, err)
 				}
 				gotPkts = append(gotPkts, parsePackets(t, data)...)
 			}

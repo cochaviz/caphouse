@@ -7,8 +7,7 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   incl_len    UInt32          CODEC(Delta,   LZ4),
   trunc_extra UInt32          CODEC(ZSTD(9)),
   components  UInt128,
-  frame_raw   String          CODEC(ZSTD(3)),
-  frame_hash  FixedString(32) CODEC(ZSTD)
+  payload     String          CODEC(ZSTD(3))
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (ts, session_id, packet_id)

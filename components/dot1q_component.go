@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"errors"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -23,10 +22,17 @@ type Dot1QComponent struct {
 	DropEligible uint8  `ch:"drop_eligible"`
 	VLANID       uint16 `ch:"vlan_id"`
 	EtherType    uint16 `ch:"type"`
+
+	// export scan buffers — populated from groupArray CTE columns
+	exportTagIndex     []uint16
+	exportPriority     []uint8
+	exportDropEligible []uint8
+	exportVLANID       []uint16
+	exportEtherType    []uint16
 }
 
-func (c *Dot1QComponent) Kind() uint            { return ComponentDot1Q }
-func (c *Dot1QComponent) Table() string         { return "pcap_dot1q" }
+func (c *Dot1QComponent) Kind() uint   { return ComponentDot1Q }
+func (c *Dot1QComponent) Name() string { return "dot1q" }
 func (c *Dot1QComponent) Order() uint           { return OrderL2Tag }
 func (c *Dot1QComponent) Index() uint16         { return c.TagIndex }
 func (c *Dot1QComponent) SetIndex(index uint16) { c.TagIndex = index }
@@ -66,12 +72,6 @@ func (c *Dot1QComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-func (c *Dot1QComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	c.SessionID = sessionID
-	err := rows.Scan(&c.PacketID, &c.TagIndex, &c.Priority, &c.DropEligible, &c.VLANID, &c.EtherType)
-	return c.PacketID, err
-}
-
 func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	tag, ok := layer.(*layers.Dot1Q)
 	if !ok {
@@ -88,6 +88,28 @@ func (c *Dot1QComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		VLANID:       tag.VLANIdentifier,
 		EtherType:    uint16(tag.Type),
 	}}, nil
+}
+
+func (c *Dot1QComponent) ExportScanTargets() []any {
+	// Order matches DataColumns("dot1q"): tag_index, priority, drop_eligible, vlan_id, type
+	// Each target is a slice that receives a groupArray result.
+	return []any{&c.exportTagIndex, &c.exportPriority, &c.exportDropEligible, &c.exportVLANID, &c.exportEtherType}
+}
+
+func (c *Dot1QComponent) ExportExpand(sessionID uint64, packetID uint32) []Component {
+	out := make([]Component, len(c.exportTagIndex))
+	for i := range c.exportTagIndex {
+		out[i] = &Dot1QComponent{
+			SessionID:    sessionID,
+			PacketID:     packetID,
+			TagIndex:     c.exportTagIndex[i],
+			Priority:     c.exportPriority[i],
+			DropEligible: c.exportDropEligible[i],
+			VLANID:       c.exportVLANID[i],
+			EtherType:    c.exportEtherType[i],
+		}
+	}
+	return out
 }
 
 func (c *Dot1QComponent) Schema(table string) string { return applySchema(dot1qSchemaSQL, table) }

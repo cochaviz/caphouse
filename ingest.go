@@ -160,7 +160,7 @@ func (c *Client) insertBatch(ctx context.Context, batch []codecPacket) error {
 	}
 
 	nucleusInsert := fmt.Sprintf(`INSERT INTO %s
-(session_id, packet_id, ts, incl_len, trunc_extra, components, frame_raw, frame_hash)
+(session_id, packet_id, ts, incl_len, trunc_extra, components, payload)
 VALUES`, c.packetsTable())
 
 	nucleusBatch, err := c.conn.PrepareBatch(ctx, nucleusInsert)
@@ -179,14 +179,13 @@ VALUES`, c.packetsTable())
 			p.Nucleus.InclLen,
 			p.Nucleus.OrigLen-p.Nucleus.InclLen,
 			p.Nucleus.Components,
-			p.Nucleus.FrameRaw,
-			p.Nucleus.FrameHash,
+			p.Nucleus.Payload,
 		); err != nil {
 			return fmt.Errorf("append nucleus: %w", err)
 		}
 
 		for _, comp := range p.Components {
-			table := c.tableRef(comp.Table())
+			table := c.tableRef(components.ComponentTable(comp))
 			if compBatches[table] == nil {
 				cols, err := comp.ClickhouseColumns()
 				if err != nil {
