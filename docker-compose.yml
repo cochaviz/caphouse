@@ -1,0 +1,15 @@
+services:
+  caphouse-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: caphouse-api
+    environment:
+      CAPHOUSE_DSN: "${CAPHOUSE_DSN}"
+    restart: unless-stopped
+
+  caphouse-ui:
+    build:
+      context: ./caphouse-ui
+      dockerfile: Dockerfile
+    restart: unless-stopped
