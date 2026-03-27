@@ -19,4 +19,13 @@ FROM alpine:3.21
 COPY --from=builder /out/caphouse     /usr/local/bin/caphouse
 COPY --from=builder /out/caphouse-api /usr/local/bin/caphouse-api
 
+# GeoIP / ASN sources — set these to enable IP geolocation enrichment.
+# Each value is a URL to a DB-IP CSV file (plain or .gz).
+# Flags --geoip-source / --geoip-source-v6 / --asn-source / --asn-source-v6
+# can be used instead.
+ENV CAPHOUSE_GEOIP_SOURCE=""
+ENV CAPHOUSE_GEOIP_SOURCE_V6=""
+ENV CAPHOUSE_ASN_SOURCE=""
+ENV CAPHOUSE_ASN_SOURCE_V6=""
+
 CMD ["caphouse-api"]
