@@ -269,6 +269,9 @@ func (c *Client) IngestPCAPStream(
 	if err != nil {
 		return 0, fmt.Errorf("pcap reader: %w", err)
 	}
+	// Some writers (e.g. dpkt) set an incorrect snaplen in the global header.
+	// Override to 65535 so we don't reject packets that exceed the declared limit.
+	reader.SetSnaplen(65535)
 
 	return c.ingestPackets(ctx, meta, reader, onPacket)
 }
