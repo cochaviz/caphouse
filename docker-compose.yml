@@ -6,6 +6,11 @@ services:
     command: caphouse-api
     environment:
       CAPHOUSE_DSN: "${CAPHOUSE_DSN}"
+      # Optional: set these to enable IP geolocation enrichment (DB-IP CSV URLs).
+      CAPHOUSE_GEOIP_SOURCE: "${CAPHOUSE_GEOIP_SOURCE:-}"
+      CAPHOUSE_GEOIP_SOURCE_V6: "${CAPHOUSE_GEOIP_SOURCE_V6:-}"
+      CAPHOUSE_ASN_SOURCE: "${CAPHOUSE_ASN_SOURCE:-}"
+      CAPHOUSE_ASN_SOURCE_V6: "${CAPHOUSE_ASN_SOURCE_V6:-}"
     restart: unless-stopped
 
   caphouse-ui:
