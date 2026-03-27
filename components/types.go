@@ -3,11 +3,12 @@ package components
 import (
 	"fmt"
 	"math/big"
+	"net"
+	"net/netip"
 	"reflect"
 	"strings"
 	"time"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 )
 
@@ -41,8 +42,7 @@ type PacketNucleus struct {
 	Components *big.Int
 	TailOffset uint16
 
-	FrameRaw  []byte
-	FrameHash []byte
+	Payload []byte
 }
 
 func (PacketNucleus) Table() string {
@@ -78,7 +78,6 @@ type DecodeContext struct {
 // ClickhouseMapper covers generic ClickHouse INSERT and SELECT column concerns
 // for any type that is stored in ClickHouse.
 type ClickhouseMapper interface {
-	Table() string
 	ClickhouseColumns() ([]string, error)
 	ClickhouseValues() ([]any, error)
 	// DataColumns returns SELECT column expressions derived from the struct's
@@ -94,6 +93,9 @@ type ClickhouseMapper interface {
 	DataColumns(tableAlias string) ([]string, error)
 }
 
+// ComponentTable returns the ClickHouse table name for c ("pcap_" + c.Name()).
+func ComponentTable(c Component) string { return "pcap_" + c.Name() }
+
 // LayerEncoder defines the encoding contract for a gopacket layer.
 type LayerEncoder interface {
 	Encode(gopacket.Layer) ([]Component, error)
@@ -105,11 +107,137 @@ type Component interface {
 	ClickhouseMapper
 	LayerDecoder
 	LayerEncoder
-	// Component-specific ClickHouse methods for schema management and export.
+	// Name returns the short component alias (e.g. "ethernet", "ipv4").
+	// The ClickHouse table name is "pcap_" + Name().
+	Name() string
 	Schema(table string) string
 	Indexes(table string) []string
 	FetchOrderBy() string
-	ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error)
+}
+
+// RepeatableExporter is implemented by components that can appear multiple
+// times per packet (Dot1Q, IPv6Ext). Their wide-JOIN scan targets are
+// []T slices produced by groupArray CTEs, so they cannot be derived from
+// the scalar ch-tagged struct fields via NewScanBuf.
+type RepeatableExporter interface {
+	// ExportScanTargets returns slice pointers that receive groupArray results.
+	ExportScanTargets() []any
+	// ExportExpand expands the scanned arrays into one Component per entry.
+	ExportExpand(sessionID uint64, packetID uint32) []Component
+}
+
+// ScanBuf holds Scan() pointers and a post-scan type-conversion function.
+// Targets must be passed to rows.Scan; call Apply after a successful scan
+// to convert string intermediates into the struct's typed fields.
+type ScanBuf struct {
+	Targets []any
+	Apply   func()
+}
+
+// scanMetaFields are excluded when withMeta is false.
+var scanMetaFields = map[string]bool{
+	"session_id": true, "ts": true, "packet_id": true, "codec_version": true,
+}
+
+// NewScanBuf returns a ScanBuf for the ch-tagged fields of v (must be a
+// non-nil pointer to a struct). If withMeta is false, the fields
+// "session_id", "ts", "packet_id", and "codec_version" are omitted.
+//
+// Fields whose Go type cannot be scanned directly from ClickHouse are given
+// string intermediates; Apply converts them after Scan:
+//   - []byte     → scan as *string, apply: []byte(*s)
+//   - netip.Addr → scan as *string, apply: netip.ParseAddr(*s)
+//   - [N]byte    → scan as *string, apply: copy into array
+//
+// net.IP and all other types are scanned directly.
+func NewScanBuf(v any, withMeta bool) (*ScanBuf, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return nil, fmt.Errorf("NewScanBuf: expected non-nil pointer, got %T", v)
+	}
+	rv = rv.Elem()
+	rt := rv.Type()
+	if rt.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("NewScanBuf: expected pointer to struct, got %T", v)
+	}
+
+	var targets []any
+	var appliers []func()
+
+	for i := 0; i < rt.NumField(); i++ {
+		sf := rt.Field(i)
+		if sf.PkgPath != "" {
+			continue // unexported
+		}
+		tag := sf.Tag.Get("ch")
+		if tag == "-" {
+			continue
+		}
+		name := strings.Split(tag, ",")[0]
+		if name == "" {
+			name = sf.Name
+		}
+		if !withMeta && scanMetaFields[name] {
+			continue
+		}
+
+		fv := rv.Field(i)
+
+		switch fv.Interface().(type) {
+		case net.IP:
+			// net.IP scans directly; ClickHouse IPv4/IPv6 columns return net.IP.
+			targets = append(targets, fv.Addr().Interface())
+		case netip.Addr:
+			s := new(string)
+			targets = append(targets, s)
+			fvCopy := fv
+			appliers = append(appliers, func() {
+				addr, _ := netip.ParseAddr(*s)
+				fvCopy.Set(reflect.ValueOf(addr))
+			})
+		case []byte:
+			s := new(string)
+			targets = append(targets, s)
+			fvCopy := fv
+			appliers = append(appliers, func() {
+				fvCopy.Set(reflect.ValueOf([]byte(*s)))
+			})
+		default:
+			if sf.Type.Kind() == reflect.Array && sf.Type.Elem().Kind() == reflect.Uint8 {
+				// [N]byte (e.g. [6]byte MAC addresses)
+				s := new(string)
+				targets = append(targets, s)
+				fvCopy := fv
+				appliers = append(appliers, func() {
+					src := []byte(*s)
+					for j, n := 0, fvCopy.Len(); j < n && j < len(src); j++ {
+						fvCopy.Index(j).SetUint(uint64(src[j]))
+					}
+				})
+			} else {
+				targets = append(targets, fv.Addr().Interface())
+			}
+		}
+	}
+
+	applyFn := func() {
+		for _, f := range appliers {
+			f()
+		}
+	}
+	return &ScanBuf{Targets: targets, Apply: applyFn}, nil
+}
+
+// ExpandOne copies v, sets SessionID and PacketID, and returns it as a
+// single-element Component slice. Used by non-repeatable components after
+// a NewScanBuf scan so that the scanner can be reused for the next row.
+func ExpandOne(v Component, sessionID uint64, packetID uint32) []Component {
+	rv := reflect.ValueOf(v).Elem()
+	cp := reflect.New(rv.Type())
+	cp.Elem().Set(rv)
+	cp.Elem().FieldByName("SessionID").SetUint(sessionID)
+	cp.Elem().FieldByName("PacketID").SetUint(uint64(packetID))
+	return []Component{cp.Interface().(Component)}
 }
 
 func NewComponentMask(bits ...uint) *big.Int {
@@ -245,11 +373,27 @@ func GetClickhouseValuesFrom(v any) ([]any, error) {
 			continue
 		}
 
-		val := rv.Field(i)
+		fv := rv.Field(i)
 
-		// If it’s a pointer field, Append usually wants nil or the value; keep as-is.
-		// For non-pointer fields, Interface() is fine.
-		vals = append(vals, val.Interface())
+		switch v := fv.Interface().(type) {
+		case net.IP:
+			vals = append(vals, v) // net.IP accepted directly by driver
+		case netip.Addr:
+			vals = append(vals, v.Unmap().String())
+		case []byte:
+			vals = append(vals, string(v))
+		default:
+			if sf.Type.Kind() == reflect.Array && sf.Type.Elem().Kind() == reflect.Uint8 {
+				// [N]byte → string (e.g. [6]byte MAC)
+				b := make([]byte, sf.Type.Len())
+				for j := range b {
+					b[j] = byte(fv.Index(j).Uint())
+				}
+				vals = append(vals, string(b))
+			} else {
+				vals = append(vals, fv.Interface())
+			}
+		}
 	}
 
 	return vals, nil

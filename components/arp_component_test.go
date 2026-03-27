@@ -111,8 +111,8 @@ func TestARPMetadata(t *testing.T) {
 	if c.Kind() != ComponentARP {
 		t.Errorf("Kind: got %d want %d", c.Kind(), ComponentARP)
 	}
-	if c.Table() != "pcap_arp" {
-		t.Errorf("Table: got %q want %q", c.Table(), "pcap_arp")
+	if ComponentTable(c) != "pcap_arp" {
+		t.Errorf("Table: got %q want %q", ComponentTable(c), "pcap_arp")
 	}
 	if c.HeaderLen() != 28 {
 		t.Errorf("HeaderLen: got %d want 28", c.HeaderLen())

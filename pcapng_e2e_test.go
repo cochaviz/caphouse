@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,9 +58,14 @@ func TestE2EPcapNgCompat(t *testing.T) {
 			}
 
 			// Exported bytes must be a valid classic PCAP stream.
-			out, err := integrationClient.ExportCaptureBytes(ctx, sessionID)
+			rc, _, err := integrationClient.Export(ctx, ExportOpts{SessionID: &sessionID})
 			if err != nil {
-				t.Fatalf("ExportCaptureBytes: %v", err)
+				t.Fatalf("Export: %v", err)
+			}
+			out, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("Export read: %v", err)
 			}
 			if _, err := pcapgo.NewReader(bytes.NewReader(out)); err != nil {
 				t.Fatalf("exported bytes are not valid PCAP: %v", err)

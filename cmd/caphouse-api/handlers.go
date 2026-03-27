@@ -13,8 +13,6 @@ import (
 
 	"caphouse"
 	"caphouse/geoip"
-	"caphouse/query"
-
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -214,7 +212,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			"plus any protocol component fields requested via the components list.",
 		Tags: []string{"search"},
 	}, func(ctx context.Context, input *SearchInput) (*SearchOutput, error) {
-		q, err := query.ParseQuery(input.Body.Query)
+		q, err := caphouse.Parse(input.Body.Query)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
@@ -264,7 +262,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			"Bin timestamps (bin_start_ns) are Unix nanoseconds.",
 		Tags: []string{"stats"},
 	}, func(ctx context.Context, input *CountsInput) (*CountsOutput, error) {
-		q, err := query.ParseQuery(input.Body.Query)
+		q, err := caphouse.Parse(input.Body.Query)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
@@ -397,7 +395,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 	huma.Register(api, huma.Operation{
 		OperationID: "export-capture",
 		Method:      "POST",
-		Path:        "/v1/captures/{capture_id}/export",
+		Path:        "/v1/export/{capture_id}",
 		Summary:     "Export capture as PCAP",
 		Description: "Stream a stored capture as a classic PCAP file (application/vnd.tcpdump.pcap). " +
 			"An optional ClickHouse WHERE clause restricts which packets are included. " +
@@ -411,11 +409,11 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 
 		var rc io.ReadCloser
 		if input.Body.Query != "" {
-			q, err := query.ParseQuery(input.Body.Query)
+			q, err := caphouse.Parse(input.Body.Query)
 			if err != nil {
 				return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 			}
-			rc, _, err = client.ExportCaptureFiltered(ctx, sessionID, q, nil)
+			rc, _, err = client.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID, Filter: q})
 			if err != nil {
 				if cerr := clientGone(ctx, err); cerr != nil {
 					return nil, cerr
@@ -426,7 +424,7 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 				return nil, fmt.Errorf("export: %w", err)
 			}
 		} else {
-			rc, err = client.ExportCapture(ctx, sessionID)
+			rc, _, err = client.Export(ctx, caphouse.ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				if cerr := clientGone(ctx, err); cerr != nil {
 					return nil, cerr
@@ -464,12 +462,12 @@ func registerHandlers(api huma.API, client *caphouse.Client) {
 			return nil, huma.Error400BadRequest("'from' must be before 'to'")
 		}
 
-		f, err := query.ParseQuery(input.Body.Query)
+		f, err := caphouse.Parse(input.Body.Query)
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid query: %s", err))
 		}
 		var written atomic.Int64
-		rc, total, err := client.ExportAllCapturesFiltered(ctx, input.Body.From, input.Body.To, f, &written)
+		rc, total, err := client.Export(ctx, caphouse.ExportOpts{Filter: f, From: input.Body.From, To: input.Body.To, PacketsWritten: &written})
 		if err != nil {
 			if cerr := clientGone(ctx, err); cerr != nil {
 				return nil, cerr

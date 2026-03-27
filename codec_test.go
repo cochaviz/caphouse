@@ -76,7 +76,7 @@ func TestCodecEncodeDecodeIPv4Ethernet(t *testing.T) {
 	if encoded.Nucleus.TailOffset != wantTailOffset {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, wantTailOffset)
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, payload) {
+	if !bytes.Equal(encoded.Nucleus.Payload, payload) {
 		t.Fatalf("raw tail mismatch")
 	}
 
@@ -236,7 +236,7 @@ func TestCodecIPv4UDP(t *testing.T) {
 	if encoded.Nucleus.TailOffset != 14+20+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+20+8)
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -297,7 +297,7 @@ func TestCodecIPv6UDP(t *testing.T) {
 	if encoded.Nucleus.TailOffset != 14+40+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+40+8)
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -361,7 +361,7 @@ func TestCodecIPv4OptionsUDP(t *testing.T) {
 	if encoded.Nucleus.TailOffset != 14+24+8 {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, 14+24+8)
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -388,7 +388,7 @@ func TestCodecUnsupportedLinkType(t *testing.T) {
 	if !components.ComponentHas(encoded.Nucleus.Components, components.ComponentRawFrame) {
 		t.Fatalf("expected raw frame fallback")
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame) {
 		t.Fatalf("raw frame mismatch")
 	}
 }
@@ -630,8 +630,8 @@ func TestDNSEncodeDecode(t *testing.T) {
 		t.Fatalf("questions_type[1] mismatch")
 	}
 
-	if len(encoded.Nucleus.FrameRaw) > 0 {
-		t.Fatalf("expected empty FrameRaw for DNS packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
+	if len(encoded.Nucleus.Payload) > 0 {
+		t.Fatalf("expected empty Payload for DNS packet, got %d bytes", len(encoded.Nucleus.Payload))
 	}
 
 	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -712,8 +712,8 @@ func TestNTPEncodeDecode(t *testing.T) {
 		t.Fatalf("transmit_ts mismatch: got 0x%x", ntpComp.TransmitTS)
 	}
 
-	if len(encoded.Nucleus.FrameRaw) > 0 {
-		t.Fatalf("expected empty FrameRaw for NTP packet, got %d bytes", len(encoded.Nucleus.FrameRaw))
+	if len(encoded.Nucleus.Payload) > 0 {
+		t.Fatalf("expected empty Payload for NTP packet, got %d bytes", len(encoded.Nucleus.Payload))
 	}
 
 	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -776,8 +776,8 @@ func TestDNSTruncatedPayload(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	if len(encoded.Nucleus.FrameRaw) < len(badDNS) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badDNS)], badDNS) {
-		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
+	if len(encoded.Nucleus.Payload) < len(badDNS) || !bytes.Equal(encoded.Nucleus.Payload[:len(badDNS)], badDNS) {
+		t.Fatalf("Payload prefix mismatch: got %x", encoded.Nucleus.Payload)
 	}
 
 	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -849,8 +849,8 @@ func TestDNSMalformedQuestions(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	if len(encoded.Nucleus.FrameRaw) < len(badDNS) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badDNS)], badDNS) {
-		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
+	if len(encoded.Nucleus.Payload) < len(badDNS) || !bytes.Equal(encoded.Nucleus.Payload[:len(badDNS)], badDNS) {
+		t.Fatalf("Payload prefix mismatch: got %x", encoded.Nucleus.Payload)
 	}
 
 	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -914,8 +914,8 @@ func TestNTPTruncatedPayload(t *testing.T) {
 		t.Fatalf("expected UDP component")
 	}
 
-	if len(encoded.Nucleus.FrameRaw) < len(badNTP) || !bytes.Equal(encoded.Nucleus.FrameRaw[:len(badNTP)], badNTP) {
-		t.Fatalf("FrameRaw prefix mismatch: got %x", encoded.Nucleus.FrameRaw)
+	if len(encoded.Nucleus.Payload) < len(badNTP) || !bytes.Equal(encoded.Nucleus.Payload[:len(badNTP)], badNTP) {
+		t.Fatalf("Payload prefix mismatch: got %x", encoded.Nucleus.Payload)
 	}
 
 	reconstructed, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1031,7 +1031,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 	if encoded.Nucleus.TailOffset != uint16(expectedOffset) {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, expectedOffset)
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 }
@@ -1074,7 +1074,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentTCP) {
 		t.Fatalf("expected tcp component")
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1127,14 +1127,14 @@ func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("expected ipv6 component")
 	}
-	if !bytes.Equal(encoded.Nucleus.FrameRaw, frame[encoded.Nucleus.TailOffset:]) {
+	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}
 }
 
 // TestTruncatedUDPHeaderStillParsesL3 checks that a frame whose UDP header is
 // shorter than the required 8 bytes still produces Ethernet + IPv4 components,
-// with the truncated UDP bytes stored in FrameRaw (no raw-frame fallback).
+// with the truncated UDP bytes stored in Payload (no raw-frame fallback).
 func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 	partialUDP := []byte{0x04, 0xd2, 0x16, 0x2e} // 4 bytes: src/dst port only
 	ipHeader := buildIPv4Header(nil, len(partialUDP))
@@ -1168,8 +1168,8 @@ func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 	if encoded.Nucleus.TailOffset != wantOffset {
 		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
 	}
-	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialUDP) {
-		t.Fatalf("FrameRaw does not start with partial UDP bytes: %x", encoded.Nucleus.FrameRaw)
+	if !bytes.HasPrefix(encoded.Nucleus.Payload, partialUDP) {
+		t.Fatalf("Payload does not start with partial UDP bytes: %x", encoded.Nucleus.Payload)
 	}
 
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1183,7 +1183,7 @@ func TestTruncatedUDPHeaderStillParsesL3(t *testing.T) {
 
 // TestTruncatedTCPHeaderStillParsesL3 checks that a frame whose TCP header is
 // shorter than the required 20 bytes still produces Ethernet + IPv4 components,
-// with the truncated TCP bytes stored in FrameRaw (no raw-frame fallback).
+// with the truncated TCP bytes stored in Payload (no raw-frame fallback).
 func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 	partialTCP := make([]byte, 10) // 10 bytes: not enough for a 20-byte TCP header
 	partialTCP[0] = 0x00
@@ -1222,8 +1222,8 @@ func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 	if encoded.Nucleus.TailOffset != wantOffset {
 		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
 	}
-	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialTCP) {
-		t.Fatalf("FrameRaw does not start with partial TCP bytes: %x", encoded.Nucleus.FrameRaw)
+	if !bytes.HasPrefix(encoded.Nucleus.Payload, partialTCP) {
+		t.Fatalf("Payload does not start with partial TCP bytes: %x", encoded.Nucleus.Payload)
 	}
 
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)
@@ -1237,7 +1237,7 @@ func TestTruncatedTCPHeaderStillParsesL3(t *testing.T) {
 
 // TestTruncatedIPv4HeaderStillParsesL2 checks that a frame whose IPv4 header
 // is shorter than the required 20 bytes still produces an Ethernet component,
-// with the truncated IPv4 bytes stored in FrameRaw (no raw-frame fallback).
+// with the truncated IPv4 bytes stored in Payload (no raw-frame fallback).
 func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
 	partialIPv4 := make([]byte, 10) // 10 bytes: not enough for a 20-byte IPv4 header
 	partialIPv4[0] = 0x45           // version=4, IHL=5 (claims 20 bytes but we only supply 10)
@@ -1273,8 +1273,8 @@ func TestTruncatedIPv4HeaderStillParsesL2(t *testing.T) {
 	if encoded.Nucleus.TailOffset != wantOffset {
 		t.Fatalf("tail_offset: got %d want %d", encoded.Nucleus.TailOffset, wantOffset)
 	}
-	if !bytes.HasPrefix(encoded.Nucleus.FrameRaw, partialIPv4) {
-		t.Fatalf("FrameRaw does not start with partial IPv4 bytes: %x", encoded.Nucleus.FrameRaw)
+	if !bytes.HasPrefix(encoded.Nucleus.Payload, partialIPv4) {
+		t.Fatalf("Payload does not start with partial IPv4 bytes: %x", encoded.Nucleus.Payload)
 	}
 
 	out, err := reconstructFrame(encoded.Nucleus, encoded.Components)

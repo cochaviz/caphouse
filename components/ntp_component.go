@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"errors"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -38,8 +37,8 @@ type NTPComponent struct {
 	NTPRaw []byte `ch:"ntp_raw"`
 }
 
-func (c *NTPComponent) Kind() uint           { return ComponentNTP }
-func (c *NTPComponent) Table() string        { return "pcap_ntp" }
+func (c *NTPComponent) Kind() uint   { return ComponentNTP }
+func (c *NTPComponent) Name() string { return "ntp" }
 func (c *NTPComponent) Order() uint          { return OrderL7Base }
 func (c *NTPComponent) Index() uint16        { return 0 }
 func (c *NTPComponent) SetIndex(_ uint16)    {}
@@ -51,13 +50,7 @@ func (c *NTPComponent) ClickhouseColumns() ([]string, error) {
 }
 
 func (c *NTPComponent) ClickhouseValues() ([]any, error) {
-	return []any{
-		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.LeapIndicator, c.Version, c.Mode, c.Stratum, c.Poll, c.Precision,
-		c.RootDelay, c.RootDispersion, c.ReferenceID,
-		c.ReferenceTS, c.OriginTS, c.ReceiveTS, c.TransmitTS,
-		string(c.NTPRaw),
-	}, nil
+	return GetClickhouseValuesFrom(c)
 }
 
 func (c *NTPComponent) ApplyNucleus(nucleus PacketNucleus) {
@@ -77,20 +70,6 @@ func (c *NTPComponent) Reconstruct(ctx *DecodeContext) error {
 
 func (c *NTPComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *NTPComponent) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var raw string
-	c.SessionID = sessionID
-	err := rows.Scan(
-		&c.PacketID,
-		&c.LeapIndicator, &c.Version, &c.Mode, &c.Stratum, &c.Poll, &c.Precision,
-		&c.RootDelay, &c.RootDispersion, &c.ReferenceID,
-		&c.ReferenceTS, &c.OriginTS, &c.ReceiveTS, &c.TransmitTS,
-		&raw,
-	)
-	c.NTPRaw = []byte(raw)
-	return c.PacketID, err
 }
 
 func (c *NTPComponent) Encode(layer gopacket.Layer) ([]Component, error) {

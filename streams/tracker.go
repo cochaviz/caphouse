@@ -152,7 +152,7 @@ func (t *Tracker) Observe(nucleus components.PacketNucleus, comps []components.C
 
 	st.lastPacketID = nucleus.PacketID
 	st.packetCount++
-	tailBytes := nucleus.FrameRaw
+	tailBytes := nucleus.Payload
 	st.byteCount += uint64(len(tailBytes))
 
 	isSYN := tcpComp.Flags&components.TCPFlagSYN != 0

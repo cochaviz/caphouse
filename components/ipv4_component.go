@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 
-	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -40,8 +39,8 @@ type IPv4Component struct {
 	OptionsRaw []byte `ch:"options_raw"`
 }
 
-func (c *IPv4Component) Kind() uint           { return ComponentIPv4 }
-func (c *IPv4Component) Table() string        { return "pcap_ipv4" }
+func (c *IPv4Component) Kind() uint   { return ComponentIPv4 }
+func (c *IPv4Component) Name() string { return "ipv4" }
 func (c *IPv4Component) Order() uint          { return OrderL3Base }
 func (c *IPv4Component) Index() uint16        { return 0 }
 func (c *IPv4Component) SetIndex(_ uint16)    {}
@@ -52,15 +51,8 @@ func (c *IPv4Component) ClickhouseColumns() ([]string, error) {
 	return GetClickhouseColumnsFrom(c)
 }
 
-// ClickhouseValues overrides reflection to convert netip.Addr to strings.
 func (c *IPv4Component) ClickhouseValues() ([]any, error) {
-	return []any{
-		c.SessionID, c.Ts, c.PacketID, c.CodecVersion,
-		c.Protocol, ipv4String(c.SrcIP4), ipv4String(c.DstIP4),
-		c.IPv4IHL, c.IPv4TOS, c.IPv4TotalLen, c.IPv4ID,
-		c.IPv4Flags, c.IPv4FragOffset, c.IPv4TTL, c.IPv4HdrChecksum,
-		string(c.OptionsRaw),
-	}, nil
+	return GetClickhouseValuesFrom(c)
 }
 
 func (c *IPv4Component) ApplyNucleus(nucleus PacketNucleus) {
@@ -110,22 +102,6 @@ func (c *IPv4Component) Reconstruct(ctx *DecodeContext) error {
 
 func (c *IPv4Component) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
-}
-
-func (c *IPv4Component) ScanRow(sessionID uint64, rows chdriver.Rows) (uint32, error) {
-	var src, dst, optRaw string
-	c.SessionID = sessionID
-	err := rows.Scan(
-		&c.PacketID, &c.Protocol,
-		&src, &dst,
-		&c.IPv4IHL, &c.IPv4TOS, &c.IPv4TotalLen, &c.IPv4ID,
-		&c.IPv4Flags, &c.IPv4FragOffset, &c.IPv4TTL, &c.IPv4HdrChecksum,
-		&optRaw,
-	)
-	c.SrcIP4, _ = netip.ParseAddr(src)
-	c.DstIP4, _ = netip.ParseAddr(dst)
-	c.OptionsRaw = []byte(optRaw)
-	return c.PacketID, err
 }
 
 func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
