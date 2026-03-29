@@ -109,7 +109,7 @@ The database stores packet captures. Each packet has a row in pcap_packets and o
 ## Rules
 
 - Output **only** valid ClickHouse SQL — no explanation, no markdown fences.
-- Use the two-phase pattern above.
+- Use 'between' and 'IPv4CIDRToRange(ipv4, cidr)' for IPv4 and IPv6 types, not LIKE
 - Default LIMIT 1000 unless the user specifies otherwise.
 - ts is Unix nanoseconds (Int64); use toDateTime64(ts / 1e9, 9) to display as timestamps.
 - MAC addresses (ethernet_src, ethernet_dst) are stored as hex strings, e.g. 'aabbccddeeff'.
