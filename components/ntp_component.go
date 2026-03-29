@@ -15,7 +15,6 @@ var ntpSchemaSQL string
 // ntp_raw holds the full wire bytes for lossless reconstruction.
 type NTPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -37,8 +36,8 @@ type NTPComponent struct {
 	NTPRaw []byte `ch:"ntp_raw"`
 }
 
-func (c *NTPComponent) Kind() uint   { return ComponentNTP }
-func (c *NTPComponent) Name() string { return "ntp" }
+func (c *NTPComponent) Kind() uint           { return ComponentNTP }
+func (c *NTPComponent) Name() string         { return "ntp" }
 func (c *NTPComponent) Order() uint          { return OrderL7Base }
 func (c *NTPComponent) Index() uint16        { return 0 }
 func (c *NTPComponent) SetIndex(_ uint16)    {}
@@ -55,7 +54,6 @@ func (c *NTPComponent) ClickhouseValues() ([]any, error) {
 
 func (c *NTPComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

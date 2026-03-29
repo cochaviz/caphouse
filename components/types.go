@@ -136,12 +136,12 @@ type ScanBuf struct {
 
 // scanMetaFields are excluded when withMeta is false.
 var scanMetaFields = map[string]bool{
-	"session_id": true, "ts": true, "packet_id": true, "codec_version": true,
+	"session_id": true, "packet_id": true, "codec_version": true,
 }
 
 // NewScanBuf returns a ScanBuf for the ch-tagged fields of v (must be a
 // non-nil pointer to a struct). If withMeta is false, the fields
-// "session_id", "ts", "packet_id", and "codec_version" are omitted.
+// "session_id", "packet_id", and "codec_version" are omitted.
 //
 // Fields whose Go type cannot be scanned directly from ClickHouse are given
 // string intermediates; Apply converts them after Scan:
@@ -312,7 +312,7 @@ func GetDataColumnsFrom(v any, tableAlias string) ([]string, error) {
 		return nil, err
 	}
 	withAlias := tableAlias != ""
-	alwaysExclude := map[string]bool{"session_id": true, "codec_version": true, "ts": true}
+	alwaysExclude := map[string]bool{"session_id": true, "codec_version": true}
 
 	cols := make([]string, 0, len(all))
 	for _, col := range all {

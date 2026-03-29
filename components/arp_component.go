@@ -16,7 +16,6 @@ var arpSchemaSQL string
 // ARPComponent stores parsed ARP header fields.
 type ARPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -29,8 +28,8 @@ type ARPComponent struct {
 	TargetIP  net.IP  `ch:"target_ip"`
 }
 
-func (c *ARPComponent) Kind() uint   { return ComponentARP }
-func (c *ARPComponent) Name() string { return "arp" }
+func (c *ARPComponent) Kind() uint           { return ComponentARP }
+func (c *ARPComponent) Name() string         { return "arp" }
 func (c *ARPComponent) Order() uint          { return OrderL4Base }
 func (c *ARPComponent) Index() uint16        { return 0 }
 func (c *ARPComponent) SetIndex(_ uint16)    {}
@@ -47,7 +46,6 @@ func (c *ARPComponent) ClickhouseValues() ([]any, error) {
 
 func (c *ARPComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -60,7 +58,7 @@ func (c *ARPComponent) Reconstruct(ctx *DecodeContext) error {
 		// TODO Actually interpret these two fields from data
 		AddrType:          layers.LinkTypeEthernet,
 		Protocol:          layers.EthernetTypeIPv4,
-		HwAddressSize:     8,
+		HwAddressSize:     6,
 		ProtAddressSize:   4,
 		Operation:         c.ArpOp,
 		SourceHwAddress:   c.SenderMAC[:],

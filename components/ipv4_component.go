@@ -17,7 +17,6 @@ var ipv4SchemaSQL string
 // IPv4Component stores parsed IPv4 fields, including any option bytes.
 type IPv4Component struct {
 	SessionID uint64 `ch:"session_id"`
-	Ts        int64  `ch:"ts"`
 	PacketID  uint32 `ch:"packet_id"`
 
 	CodecVersion uint16 `ch:"codec_version"`
@@ -39,8 +38,8 @@ type IPv4Component struct {
 	OptionsRaw []byte `ch:"options_raw"`
 }
 
-func (c *IPv4Component) Kind() uint   { return ComponentIPv4 }
-func (c *IPv4Component) Name() string { return "ipv4" }
+func (c *IPv4Component) Kind() uint           { return ComponentIPv4 }
+func (c *IPv4Component) Name() string         { return "ipv4" }
 func (c *IPv4Component) Order() uint          { return OrderL3Base }
 func (c *IPv4Component) Index() uint16        { return 0 }
 func (c *IPv4Component) SetIndex(_ uint16)    {}
@@ -57,7 +56,6 @@ func (c *IPv4Component) ClickhouseValues() ([]any, error) {
 
 func (c *IPv4Component) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

@@ -57,7 +57,7 @@ func (c *Client) queryJSON(ctx context.Context, sql string) ([]map[string]any, e
 
 // searchSQL builds the two-phase SQL used by QueryJSON: an inner IDsSQL subquery
 // for pagination, wrapped in an outer SELECT with LEFT JOINs for display columns.
-func (c *Client) searchSQL(f Filter, sessionIDs []uint64, comps []string, limit, offset int, fromNs, toNs int64, asc bool) (string, error) {
+func (c *Client) SearchSQL(f Filter, sessionIDs []uint64, comps []string, limit, offset int, fromNs, toNs int64, asc, captures bool) (string, error) {
 	for _, comp := range comps {
 		if !registryComponents[comp] {
 			return "", fmt.Errorf("unknown component %q", comp)
@@ -77,27 +77,27 @@ func (c *Client) searchSQL(f Filter, sessionIDs []uint64, comps []string, limit,
 		"p.incl_len + p.trunc_extra AS orig_len",
 		"toUInt64(p.components) AS components",
 	}
+	showCaptures := captures || f.captures
+	if showCaptures {
+		selectParts = append(selectParts, "captures.sensor")
+	}
 	for _, comp := range comps {
 		proto := componentByName(comp)
 		cols, _ := proto.DataColumns(comp)
 		selectParts = append(selectParts, cols...)
 	}
-	var joins []string
-	for _, comp := range comps {
-		tableRef := c.tableRef("pcap_" + comp)
-		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
-				tableRef, comp, comp, comp),
-		)
-	}
 
 	var sb strings.Builder
 	sb.WriteString("SELECT\n    ")
 	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	sb.WriteString(fmt.Sprintf("\nFROM %s AS p", c.packetsTable()))
-	for _, j := range joins {
-		sb.WriteString("\n")
-		sb.WriteString(j)
+	fmt.Fprintf(&sb, "\nFROM %s AS p", c.packetsTable())
+	if showCaptures {
+		fmt.Fprintf(&sb, "\nLEFT JOIN %s AS captures USING (session_id)", c.capturesTable())
+	}
+	for _, comp := range comps {
+		tableRef := c.tableRef("pcap_" + comp)
+		fmt.Fprintf(&sb, "\nLEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
+			tableRef, comp, comp, comp)
 	}
 	sb.WriteString("\nWHERE (p.session_id, p.packet_id) IN (\n")
 	sb.WriteString(idSQL)
@@ -117,7 +117,7 @@ func (c *Client) searchSQL(f Filter, sessionIDs []uint64, comps []string, limit,
 // When sessionIDs is nil or empty, all sessions are searched.
 // fromNs and toNs are optional Unix-nanosecond timestamp bounds (0 = unset).
 func (c *Client) QueryJSON(ctx context.Context, sessionIDs []uint64, q Filter, comps []string, limit, offset int, fromNs, toNs int64, asc bool) ([]map[string]any, error) {
-	sql, err := c.searchSQL(q, sessionIDs, comps, limit, offset, fromNs, toNs, asc)
+	sql, err := c.SearchSQL(q, sessionIDs, comps, limit, offset, fromNs, toNs, asc, false)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (c *Client) QueryPacketFrame(ctx context.Context, sessionID uint64, packetI
 	var (
 		inclLen    uint32
 		truncExtra uint32
-		payload   string
+		payload    string
 	)
 	componentMask := new(big.Int)
 	if err := row.Scan(&inclLen, &truncExtra, componentMask, &payload); err != nil {
@@ -381,4 +381,45 @@ func componentByName(name string) components.Component {
 		}
 	}
 	return nil
+}
+
+// QueryRaw executes an arbitrary SQL string and returns column names and all
+// rows.
+func (c *Client) QueryRaw(ctx context.Context, sql string) (columns []string, rows [][]any, err error) {
+	dbRows, err := c.conn.Query(ctx, sql)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer dbRows.Close()
+
+	cols := dbRows.Columns()
+	colTypes := dbRows.ColumnTypes()
+
+	for dbRows.Next() {
+		ptrs := make([]any, len(colTypes))
+		for i, ct := range colTypes {
+			ptrs[i] = reflect.New(ct.ScanType()).Interface()
+		}
+		if err := dbRows.Scan(ptrs...); err != nil {
+			return nil, nil, fmt.Errorf("scan: %w", err)
+		}
+		row := make([]any, len(cols))
+		for i, ct := range colTypes {
+			v := reflect.ValueOf(ptrs[i]).Elem().Interface()
+			switch tv := v.(type) {
+			case uint64:
+				row[i] = strconv.FormatUint(tv, 10)
+			case string:
+				if strings.HasPrefix(ct.DatabaseTypeName(), "FixedString") {
+					row[i] = hex.EncodeToString([]byte(tv))
+				} else {
+					row[i] = tv
+				}
+			default:
+				row[i] = v
+			}
+		}
+		rows = append(rows, row)
+	}
+	return cols, rows, dbRows.Err()
 }

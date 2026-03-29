@@ -20,7 +20,6 @@ var dnsSchemaSQL string
 // to the originals but will not use DNS name compression (RFC 1035 §4.1.4).
 type DNSComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -61,8 +60,8 @@ type DNSComponent struct {
 	AdditionalRdata []string `ch:"additional_rdata"`
 }
 
-func (c *DNSComponent) Kind() uint   { return ComponentDNS }
-func (c *DNSComponent) Name() string { return "dns" }
+func (c *DNSComponent) Kind() uint           { return ComponentDNS }
+func (c *DNSComponent) Name() string         { return "dns" }
 func (c *DNSComponent) Order() uint          { return OrderL7Base }
 func (c *DNSComponent) Index() uint16        { return 0 }
 func (c *DNSComponent) SetIndex(_ uint16)    {}
@@ -79,7 +78,6 @@ func (c *DNSComponent) ClickhouseValues() ([]any, error) {
 
 func (c *DNSComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

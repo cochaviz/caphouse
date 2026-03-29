@@ -136,3 +136,52 @@ func validateIdent(name string) error {
 	}
 	return nil
 }
+
+// TableSchema describes the queryable columns for a single table, using the
+// names as they appear in query results (i.e. with component alias prefixes).
+type TableSchema struct {
+	Name    string   `json:"name"`    // SQL alias used in queries (e.g. "ipv4", "p", "captures")
+	Label   string   `json:"label"`   // human-readable label
+	Columns []string `json:"columns"` // result-column names
+}
+
+// DisplaySchema returns schema metadata for all queryable tables, suitable
+// for display in a UI or documentation.
+func (c *Client) DisplaySchema() []TableSchema {
+	tables := []TableSchema{
+		{
+			Name:  "p",
+			Label: "Packet",
+			Columns: []string{
+				"session_id", "packet_id", "ts",
+				"incl_len", "orig_len", "payload",
+			},
+		},
+		{
+			Name:  "captures",
+			Label: "Capture",
+			Columns: []string{
+				"session_id", "sensor", "endianness",
+				"snaplen", "linktype", "time_res",
+			},
+		},
+	}
+	for _, kind := range components.KnownComponentKinds {
+		proto := components.ComponentFactories[kind]()
+		name := proto.Name()
+		cols, err := proto.DataColumns(name)
+		if err != nil {
+			continue
+		}
+		// DataColumns with alias returns "alias.col AS result_col" — extract result_col.
+		colNames := make([]string, 0, len(cols))
+		for _, expr := range cols {
+			if idx := strings.Index(expr, " AS "); idx >= 0 {
+				colNames = append(colNames, expr[idx+4:])
+			}
+		}
+		label := strings.ToUpper(name[:1]) + name[1:]
+		tables = append(tables, TableSchema{Name: name, Label: label, Columns: colNames})
+	}
+	return tables
+}

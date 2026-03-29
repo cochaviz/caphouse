@@ -15,7 +15,6 @@ var ethernetSchemaSQL string
 // EthernetComponent stores raw ethernet header bytes.
 type EthernetComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 	SrcMAC       []byte `ch:"src"`
@@ -24,8 +23,8 @@ type EthernetComponent struct {
 	Length       uint16 `ch:"len"`
 }
 
-func (c *EthernetComponent) Kind() uint   { return ComponentEthernet }
-func (c *EthernetComponent) Name() string { return "ethernet" }
+func (c *EthernetComponent) Kind() uint           { return ComponentEthernet }
+func (c *EthernetComponent) Name() string         { return "ethernet" }
 func (c *EthernetComponent) Order() uint          { return OrderL2Base }
 func (c *EthernetComponent) Index() uint16        { return 0 }
 func (c *EthernetComponent) SetIndex(_ uint16)    {}
@@ -42,7 +41,6 @@ func (c *EthernetComponent) ClickhouseValues() ([]any, error) {
 
 func (c *EthernetComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 
@@ -68,7 +66,6 @@ func (c *EthernetComponent) DataColumns(tableAlias string) ([]string, error) {
 	return GetDataColumnsFrom(c, tableAlias)
 }
 
-
 func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	eth, ok := layer.(*layers.Ethernet)
 	if !ok {
@@ -89,7 +86,6 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		Length:       eth.Length,
 	}}, nil
 }
-
 
 func (c *EthernetComponent) Schema(table string) string { return applySchema(ethernetSchemaSQL, table) }
 func (c *EthernetComponent) Indexes(_ string) []string  { return nil }
