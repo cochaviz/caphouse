@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"caphouse"
+
 	"github.com/danielgtaylor/huma/v2"
 )
 
@@ -52,6 +57,21 @@ type QueryExecuteOutput struct {
 	}
 }
 
+// QueryGenerateInput is the request body for POST /v1/query/generate.
+type QueryGenerateInput struct {
+	Body struct {
+		Prompt  string `json:"prompt"           required:"true" doc:"Natural-language description of the query to generate."`
+		BaseSQL string `json:"base_sql,omitempty"               doc:"The SQL query that would be generated without any filter — provides structural context for the AI."`
+	}
+}
+
+// QueryGenerateOutput is the response for POST /v1/query/generate.
+type QueryGenerateOutput struct {
+	Body struct {
+		SQL string `json:"sql" doc:"Generated ClickHouse SQL ready to execute."`
+	}
+}
+
 // parseTimeOptional parses an optional ISO 8601 / datetime-local string as UTC.
 // Returns nil, nil when s is empty.
 func parseTimeOptional(s string) (*time.Time, error) {
@@ -66,7 +86,113 @@ func parseTimeOptional(s string) (*time.Time, error) {
 	return nil, fmt.Errorf("unrecognised datetime format %q", s)
 }
 
-func registerQueryHandlers(api huma.API, client *caphouse.Client) {
+// buildSchemaPrompt builds a system prompt that describes the ClickHouse schema
+// and the expected query pattern, so the model can generate valid SQL.
+func buildSchemaPrompt(schema []caphouse.TableSchema) string {
+	var sb strings.Builder
+	sb.WriteString(`You are a ClickHouse SQL expert for a network packet capture database.
+
+## Schema
+
+The database stores packet captures. Each packet has a row in pcap_packets and optional rows in per-protocol component tables joined by (session_id, packet_id).
+
+`)
+	for _, t := range schema {
+		colStrs := make([]string, len(t.Columns))
+		for i, c := range t.Columns {
+			colStrs[i] = c.Name + " " + c.Type
+		}
+		fmt.Fprintf(&sb, "**%s** (alias `%s`): %s\n", t.Label, t.Name, strings.Join(colStrs, ", "))
+	}
+
+	sb.WriteString(`
+## Rules
+
+- Output **only** valid ClickHouse SQL — no explanation, no markdown fences.
+- Use the two-phase pattern above.
+- Default LIMIT 1000 unless the user specifies otherwise.
+- ts is Unix nanoseconds (Int64); use toDateTime64(ts / 1e9, 9) to display as timestamps.
+- MAC addresses (ethernet_src, ethernet_dst) are stored as hex strings, e.g. 'aabbccddeeff'.
+- IPv4 addresses are dotted-decimal strings, e.g. '192.168.1.1'.
+- Component tables are named pcap_<name> (e.g. pcap_ipv4, pcap_tcp, pcap_udp, pcap_dns).
+- Add inline SQL comments (--) to explain non-obvious filters, joins, and expressions.
+`)
+
+	return sb.String()
+}
+
+// callAnthropic sends a single-turn message to the Anthropic Messages API
+// and returns the text of the first content block.
+func callAnthropic(ctx context.Context, apiKey, system, userMsg string) (string, error) {
+	type message struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	reqBody, err := json.Marshal(map[string]any{
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 2048,
+		"system":     system,
+		"messages":   []message{{Role: "user", Content: userMsg}},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("content-type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("anthropic request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read anthropic response: %w", err)
+	}
+
+	var parsed struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("parse anthropic response: %w", err)
+	}
+	if parsed.Error != nil {
+		return "", fmt.Errorf("anthropic error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Content) == 0 {
+		return "", fmt.Errorf("empty response from anthropic")
+	}
+	text := parsed.Content[0].Text
+
+	// Strip markdown code fences if the model wrapped the SQL in them.
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "```") {
+		lines := strings.SplitN(text, "\n", 2)
+		if len(lines) == 2 {
+			text = lines[1]
+		}
+		if idx := strings.LastIndex(text, "```"); idx >= 0 {
+			text = text[:idx]
+		}
+		text = strings.TrimSpace(text)
+	}
+	return text, nil
+}
+
+func registerQueryHandlers(api huma.API, client *caphouse.Client, anthropicKey string) {
 	// GET /v1/query/schema
 	huma.Register(api, huma.Operation{
 		OperationID: "query-schema",
@@ -160,6 +286,35 @@ func registerQueryHandlers(api huma.API, client *caphouse.Client) {
 		} else {
 			out.Body.Rows = [][]any{}
 		}
+		return out, nil
+	})
+
+	// POST /v1/query/generate
+	huma.Register(api, huma.Operation{
+		OperationID: "query-generate",
+		Method:      http.MethodPost,
+		Path:        "/v1/query/generate",
+		Summary:     "Generate SQL with AI",
+		Description: "Uses an AI model to generate ClickHouse SQL from a natural-language prompt. Requires ANTHROPIC_API_KEY to be configured.",
+		Tags:        []string{"query"},
+	}, func(ctx context.Context, input *QueryGenerateInput) (*QueryGenerateOutput, error) {
+		if anthropicKey == "" {
+			return nil, huma.NewError(http.StatusNotImplemented, "AI generation is not configured (missing ANTHROPIC_API_KEY)")
+		}
+		system := buildSchemaPrompt(client.DisplaySchema())
+		userMsg := input.Body.Prompt
+		if input.Body.BaseSQL != "" {
+			userMsg = "Base query (without filters, for structural reference):\n" + input.Body.BaseSQL + "\n\nRequest: " + input.Body.Prompt
+		}
+		sql, err := callAnthropic(ctx, anthropicKey, system, userMsg)
+		if err != nil {
+			if cerr := clientGone(ctx, err); cerr != nil {
+				return nil, cerr
+			}
+			return nil, fmt.Errorf("generate SQL: %w", err)
+		}
+		out := &QueryGenerateOutput{}
+		out.Body.SQL = sql
 		return out, nil
 	})
 }

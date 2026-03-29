@@ -137,32 +137,93 @@ func validateIdent(name string) error {
 	return nil
 }
 
+// ColumnDef is a queryable column with its ClickHouse type.
+type ColumnDef struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 // TableSchema describes the queryable columns for a single table, using the
 // names as they appear in query results (i.e. with component alias prefixes).
 type TableSchema struct {
-	Name    string   `json:"name"`    // SQL alias used in queries (e.g. "ipv4", "p", "captures")
-	Label   string   `json:"label"`   // human-readable label
-	Columns []string `json:"columns"` // result-column names
+	Name    string      `json:"name"`    // SQL alias used in queries (e.g. "ipv4", "p", "captures")
+	Label   string      `json:"label"`   // human-readable label
+	Columns []ColumnDef `json:"columns"` // result-column names with ClickHouse types
+}
+
+// parseSchemaColumnTypes extracts column → ClickHouse type from a CREATE TABLE statement.
+func parseSchemaColumnTypes(sql string) map[string]string {
+	types := make(map[string]string)
+	start := strings.Index(sql, "(")
+	end := strings.LastIndex(sql, ")")
+	if start < 0 || end <= start {
+		return types
+	}
+	for _, line := range strings.Split(sql[start+1:end], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "--") {
+			continue
+		}
+		line = strings.TrimRight(line, ",")
+		upper := strings.ToUpper(line)
+		for _, kw := range []string{" CODEC(", " COMMENT ", " DEFAULT ", " TTL ", " ALIAS "} {
+			if i := strings.Index(upper, kw); i >= 0 {
+				line = strings.TrimSpace(line[:i])
+				upper = strings.ToUpper(line)
+			}
+		}
+		idx := strings.IndexByte(line, ' ')
+		if idx < 0 {
+			continue
+		}
+		name, typ := line[:idx], strings.TrimSpace(line[idx+1:])
+		switch strings.ToUpper(name) {
+		case "ENGINE", "ORDER", "PRIMARY", "PARTITION", "SETTINGS", "INDEX", "PROJECTION", "SAMPLE":
+			continue
+		}
+		if name != "" && typ != "" {
+			types[name] = typ
+		}
+	}
+	return types
 }
 
 // DisplaySchema returns schema metadata for all queryable tables, suitable
 // for display in a UI or documentation.
 func (c *Client) DisplaySchema() []TableSchema {
+	packetTypes := parseSchemaColumnTypes(packetsSchemaSQL)
+	captureTypes := parseSchemaColumnTypes(capturesSchemaSQL)
+
+	colDef := func(typMap map[string]string, name string, fallback string) ColumnDef {
+		if t, ok := typMap[name]; ok {
+			return ColumnDef{Name: name, Type: t}
+		}
+		return ColumnDef{Name: name, Type: fallback}
+	}
+
 	tables := []TableSchema{
 		{
 			Name:  "p",
 			Label: "Packet",
-			Columns: []string{
-				"session_id", "packet_id", "ts",
-				"incl_len", "orig_len", "payload",
+			Columns: []ColumnDef{
+				colDef(packetTypes, "session_id", "UInt64"),
+				colDef(packetTypes, "packet_id", "UInt32"),
+				colDef(packetTypes, "ts", "Int64"),
+				colDef(packetTypes, "incl_len", "UInt32"),
+				{Name: "orig_len", Type: "UInt32"},
+				colDef(packetTypes, "payload", "String"),
 			},
 		},
 		{
 			Name:  "captures",
 			Label: "Capture",
-			Columns: []string{
-				"session_id", "sensor", "endianness",
-				"snaplen", "linktype", "time_res",
+			Columns: []ColumnDef{
+				colDef(captureTypes, "session_id", "UInt64"),
+				colDef(captureTypes, "sensor", "String"),
+				colDef(captureTypes, "endianness", "String"),
+				colDef(captureTypes, "snaplen", "UInt32"),
+				colDef(captureTypes, "linktype", "UInt32"),
+				colDef(captureTypes, "time_res", "String"),
 			},
 		},
 	}
@@ -173,15 +234,24 @@ func (c *Client) DisplaySchema() []TableSchema {
 		if err != nil {
 			continue
 		}
-		// DataColumns with alias returns "alias.col AS result_col" — extract result_col.
-		colNames := make([]string, 0, len(cols))
+		schemaTypes := parseSchemaColumnTypes(proto.Schema("t"))
+		defs := make([]ColumnDef, 0, len(cols))
 		for _, expr := range cols {
-			if idx := strings.Index(expr, " AS "); idx >= 0 {
-				colNames = append(colNames, expr[idx+4:])
+			// expr is "alias.rawCol AS resultCol"; extract both parts.
+			asIdx := strings.Index(expr, " AS ")
+			if asIdx < 0 {
+				continue
 			}
+			qualified := expr[:asIdx]                                 // e.g. "ipv4.src"
+			rawCol := qualified[strings.IndexByte(qualified, '.')+1:] // e.g. "src"
+			typ := schemaTypes[rawCol]
+			if typ == "" {
+				typ = "String"
+			}
+			defs = append(defs, ColumnDef{Name: qualified, Type: typ})
 		}
 		label := strings.ToUpper(name[:1]) + name[1:]
-		tables = append(tables, TableSchema{Name: name, Label: label, Columns: colNames})
+		tables = append(tables, TableSchema{Name: name, Label: label, Columns: defs})
 	}
 	return tables
 }
