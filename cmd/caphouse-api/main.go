@@ -111,8 +111,7 @@ func rootCmd() *cobra.Command {
 
 			api := humachi.New(r, config)
 
-			registerHandlers(api, client)
-			registerQueryHandlers(api, client)
+			registerAllHandlers(api, client)
 
 			logger.Info("starting server", "addr", addr)
 			logger.Info("OpenAPI docs available", "url", "http://"+addr+"/docs")
