@@ -13,7 +13,6 @@ var ipv6ExtSchemaSQL string
 // IPv6ExtComponent stores one raw IPv6 extension header (repeatable).
 type IPv6ExtComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 	ExtIndex     uint16 `ch:"ext_index"`
@@ -26,8 +25,8 @@ type IPv6ExtComponent struct {
 	exportExtRaw   []string // groupArray of a String column yields []string
 }
 
-func (c *IPv6ExtComponent) Kind() uint   { return ComponentIPv6Ext }
-func (c *IPv6ExtComponent) Name() string { return "ipv6_ext" }
+func (c *IPv6ExtComponent) Kind() uint           { return ComponentIPv6Ext }
+func (c *IPv6ExtComponent) Name() string         { return "ipv6_ext" }
 func (c *IPv6ExtComponent) Order() uint          { return OrderL3Ext }
 func (c *IPv6ExtComponent) Index() uint16        { return c.ExtIndex }
 func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.ExtIndex = i }
@@ -50,7 +49,6 @@ func (c *IPv6ExtComponent) ClickhouseValues() ([]any, error) {
 
 func (c *IPv6ExtComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

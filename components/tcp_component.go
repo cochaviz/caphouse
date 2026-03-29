@@ -33,7 +33,6 @@ const (
 // enabling bit-perfect frame reconstruction without checksum recomputation.
 type TCPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -49,8 +48,8 @@ type TCPComponent struct {
 	OptionsRaw []byte `ch:"options_raw"`
 }
 
-func (c *TCPComponent) Kind() uint   { return ComponentTCP }
-func (c *TCPComponent) Name() string { return "tcp" }
+func (c *TCPComponent) Kind() uint           { return ComponentTCP }
+func (c *TCPComponent) Name() string         { return "tcp" }
 func (c *TCPComponent) Order() uint          { return OrderL4Base }
 func (c *TCPComponent) Index() uint16        { return 0 }
 func (c *TCPComponent) SetIndex(_ uint16)    {}
@@ -67,7 +66,6 @@ func (c *TCPComponent) ClickhouseValues() ([]any, error) {
 
 func (c *TCPComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

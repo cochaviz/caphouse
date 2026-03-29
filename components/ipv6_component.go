@@ -17,7 +17,6 @@ var ipv6SchemaSQL string
 // IPv6Component stores parsed IPv6 fields.
 type IPv6Component struct {
 	SessionID uint64 `ch:"session_id"`
-	Ts        int64  `ch:"ts"`
 	PacketID  uint32 `ch:"packet_id"`
 
 	CodecVersion uint16 `ch:"codec_version"`
@@ -33,8 +32,8 @@ type IPv6Component struct {
 	IPv6TrafficClass uint8  `ch:"traffic_class"`
 }
 
-func (c *IPv6Component) Kind() uint   { return ComponentIPv6 }
-func (c *IPv6Component) Name() string { return "ipv6" }
+func (c *IPv6Component) Kind() uint           { return ComponentIPv6 }
+func (c *IPv6Component) Name() string         { return "ipv6" }
 func (c *IPv6Component) Order() uint          { return OrderL3Base }
 func (c *IPv6Component) Index() uint16        { return 0 }
 func (c *IPv6Component) SetIndex(_ uint16)    {}
@@ -51,7 +50,6 @@ func (c *IPv6Component) ClickhouseValues() ([]any, error) {
 
 func (c *IPv6Component) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

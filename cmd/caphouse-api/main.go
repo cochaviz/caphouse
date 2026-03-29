@@ -82,7 +82,7 @@ func rootCmd() *cobra.Command {
 				ASNV6:  asnSourceV6,
 			}
 			if geoCfg.CityV4 != "" || geoCfg.CityV6 != "" || geoCfg.ASNV4 != "" || geoCfg.ASNV6 != "" {
-				if geoip.DictionariesReady(ctx, client.Conn()) {
+				if geoip.DictionariesReady(ctx, client.Conn(), geoCfg) {
 					logger.Info("geoip dictionaries already loaded, skipping init")
 				} else {
 					logger.Info("starting geoip init in background",
@@ -112,6 +112,7 @@ func rootCmd() *cobra.Command {
 			api := humachi.New(r, config)
 
 			registerHandlers(api, client)
+			registerQueryHandlers(api, client)
 
 			logger.Info("starting server", "addr", addr)
 			logger.Info("OpenAPI docs available", "url", "http://"+addr+"/docs")

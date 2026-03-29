@@ -16,7 +16,6 @@ var udpSchemaSQL string
 // UDPComponent stores parsed UDP header fields.
 type UDPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 
@@ -26,8 +25,8 @@ type UDPComponent struct {
 	Checksum uint16 `ch:"checksum"`
 }
 
-func (c *UDPComponent) Kind() uint   { return ComponentUDP }
-func (c *UDPComponent) Name() string { return "udp" }
+func (c *UDPComponent) Kind() uint           { return ComponentUDP }
+func (c *UDPComponent) Name() string         { return "udp" }
 func (c *UDPComponent) Order() uint          { return OrderL4Base }
 func (c *UDPComponent) Index() uint16        { return 0 }
 func (c *UDPComponent) SetIndex(_ uint16)    {}
@@ -44,7 +43,6 @@ func (c *UDPComponent) ClickhouseValues() ([]any, error) {
 
 func (c *UDPComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

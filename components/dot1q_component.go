@@ -14,7 +14,6 @@ var dot1qSchemaSQL string
 // Dot1QComponent stores one vlan tag (repeatable).
 type Dot1QComponent struct {
 	SessionID    uint64 `ch:"session_id"`
-	Ts           int64  `ch:"ts"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 	TagIndex     uint16 `ch:"tag_index"`
@@ -31,8 +30,8 @@ type Dot1QComponent struct {
 	exportEtherType    []uint16
 }
 
-func (c *Dot1QComponent) Kind() uint   { return ComponentDot1Q }
-func (c *Dot1QComponent) Name() string { return "dot1q" }
+func (c *Dot1QComponent) Kind() uint            { return ComponentDot1Q }
+func (c *Dot1QComponent) Name() string          { return "dot1q" }
 func (c *Dot1QComponent) Order() uint           { return OrderL2Tag }
 func (c *Dot1QComponent) Index() uint16         { return c.TagIndex }
 func (c *Dot1QComponent) SetIndex(index uint16) { c.TagIndex = index }
@@ -49,7 +48,6 @@ func (c *Dot1QComponent) ClickhouseValues() ([]any, error) {
 
 func (c *Dot1QComponent) ApplyNucleus(nucleus PacketNucleus) {
 	c.SessionID = nucleus.SessionID
-	c.Ts = nucleus.Timestamp.UnixNano()
 	c.PacketID = nucleus.PacketID
 }
 

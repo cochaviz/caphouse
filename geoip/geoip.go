@@ -211,23 +211,38 @@ func queryASN(ctx context.Context, conn clickhouse.Conn, sql string, ips []strin
 	return rows.Err()
 }
 
-// DictionariesReady returns true when all four dictionaries (ip_trie,
-// ip_trie_v6, asn_trie, asn_trie_v6) respond to a lightweight probe lookup.
-// It is used to skip the expensive CSV re-import on restart when the data is
-// already loaded.
-func DictionariesReady(ctx context.Context, conn clickhouse.Conn) bool {
-	probes := []string{
-		`SELECT dictGetOrDefault('ip_trie',    'country_code', tuple(toIPv4OrDefault('1.1.1.1')), '')`,
-		`SELECT dictGetOrDefault('ip_trie_v6', 'country_code', tuple(toIPv6OrDefault('2606:4700::1')), '')`,
-		`SELECT dictGetOrDefault('asn_trie',   'asn',          tuple(toIPv4OrDefault('1.1.1.1')), '')`,
-		`SELECT dictGetOrDefault('asn_trie_v6','asn',          tuple(toIPv6OrDefault('2606:4700::1')), '')`,
+// DictionariesReady returns true when every dictionary that would be populated
+// by cfg already exists in ClickHouse with a non-zero element count. It is
+// used to skip the expensive CSV re-import on restart when data is already
+// loaded. Only dictionaries whose source URL is non-empty are checked, so
+// partial configurations (e.g. IPv4 only) are handled correctly.
+func DictionariesReady(ctx context.Context, conn clickhouse.Conn, cfg InitConfig) bool {
+	type entry struct {
+		name string
+		url  string
 	}
-	for _, sql := range probes {
-		if err := conn.QueryRow(ctx, sql).Scan(new(string)); err != nil {
+	entries := []entry{
+		{"ip_trie", cfg.CityV4},
+		{"ip_trie_v6", cfg.CityV6},
+		{"asn_trie", cfg.ASNV4},
+		{"asn_trie_v6", cfg.ASNV6},
+	}
+	checked := 0
+	for _, e := range entries {
+		if e.url == "" {
+			continue
+		}
+		var count uint64
+		err := conn.QueryRow(ctx,
+			`SELECT element_count FROM system.dictionaries WHERE name = ? AND status = 'LOADED'`,
+			e.name,
+		).Scan(&count)
+		if err != nil || count == 0 {
 			return false
 		}
+		checked++
 	}
-	return true
+	return checked > 0
 }
 
 // isDictUnavailable reports whether err is a ClickHouse dictionary error that
