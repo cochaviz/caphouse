@@ -11,6 +11,7 @@ services:
       CAPHOUSE_GEOIP_SOURCE_V6: "${CAPHOUSE_GEOIP_SOURCE_V6:-}"
       CAPHOUSE_ASN_SOURCE: "${CAPHOUSE_ASN_SOURCE:-}"
       CAPHOUSE_ASN_SOURCE_V6: "${CAPHOUSE_ASN_SOURCE_V6:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
     restart: unless-stopped
 
   caphouse-ui:
