@@ -6,6 +6,8 @@ services:
         volumes:
             - ..:/workspace:cached
         command: sleep infinity
+        env_file:
+            - .env
         environment:
             CAPHOUSE_DSN: "clickhouse://default:@clickhouse:9000/default"
         depends_on:
