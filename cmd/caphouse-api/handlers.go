@@ -73,9 +73,9 @@ func parseSessionIDs(ids []string) ([]uint64, error) {
 	return result, nil
 }
 
-func registerAllHandlers(api huma.API, client *caphouse.Client) {
+func registerAllHandlers(api huma.API, client *caphouse.Client, anthropicKey string) {
 	registerSearchHandlers(api, client)
 	registerExportHandlers(api, client)
 	registerStreamsHandlers(api, client)
-	registerQueryHandlers(api, client)
+	registerQueryHandlers(api, client, anthropicKey)
 }

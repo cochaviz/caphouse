@@ -31,6 +31,7 @@ func rootCmd() *cobra.Command {
 	var geoipSourceV6 string
 	var asnSource string
 	var asnSourceV6 string
+	var anthropicKey string
 	var debug bool
 
 	cmd := &cobra.Command{
@@ -56,6 +57,9 @@ func rootCmd() *cobra.Command {
 			}
 			if asnSourceV6 == "" {
 				asnSourceV6 = os.Getenv("CAPHOUSE_ASN_SOURCE_V6")
+			}
+			if anthropicKey == "" {
+				anthropicKey = os.Getenv("ANTHROPIC_API_KEY")
 			}
 
 			level := slog.LevelInfo
@@ -111,7 +115,7 @@ func rootCmd() *cobra.Command {
 
 			api := humachi.New(r, config)
 
-			registerAllHandlers(api, client)
+			registerAllHandlers(api, client, anthropicKey)
 
 			logger.Info("starting server", "addr", addr)
 			logger.Info("OpenAPI docs available", "url", "http://"+addr+"/docs")
@@ -125,6 +129,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&geoipSourceV6, "geoip-source-v6", "", "URL of a DB-IP city IPv6 CSV (or CAPHOUSE_GEOIP_SOURCE_V6)")
 	cmd.Flags().StringVar(&asnSource, "asn-source", "", "URL of a DB-IP ASN IPv4 CSV (or CAPHOUSE_ASN_SOURCE)")
 	cmd.Flags().StringVar(&asnSourceV6, "asn-source-v6", "", "URL of a DB-IP ASN IPv6 CSV (or CAPHOUSE_ASN_SOURCE_V6)")
+	cmd.Flags().StringVar(&anthropicKey, "anthropic-key", "", "Anthropic API key for AI SQL generation (or ANTHROPIC_API_KEY)")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging")
 
 	return cmd
