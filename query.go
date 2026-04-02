@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
+	"net/netip"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"caphouse/components"
 )
@@ -129,52 +132,151 @@ func (c *Client) QueryJSON(ctx context.Context, sessionIDs []uint64, q Filter, c
 	return rows, nil
 }
 
-// QueryPacketComponents fetches all parsed component fields for a single packet,
-// joining every registered component table. Returns nil when the packet is not found.
-func (c *Client) QueryPacketComponents(ctx context.Context, sessionID uint64, packetID uint32) (map[string]any, error) {
-	selectParts := []string{
-		"p.session_id AS session_id",
-		"p.packet_id AS packet_id",
-		"p.ts AS timestamp_ns",
-		"p.incl_len AS incl_len",
-		"p.incl_len + p.trunc_extra AS orig_len",
-		"toUInt64(p.components) AS components",
-		"lower(hex(p.payload)) AS payload",
-		"captures.sensor AS sensor",
-	}
-	joins := []string{
-		fmt.Sprintf("LEFT JOIN %s AS captures ON captures.session_id = p.session_id", c.capturesTable()),
-	}
-	for _, kind := range components.KnownComponentKinds {
-		proto := components.ComponentFactories[kind]()
-		alias := proto.Name()
-		cols, _ := proto.DataColumns(alias)
-		selectParts = append(selectParts, cols...)
-		joins = append(joins,
-			fmt.Sprintf("LEFT JOIN %s AS %s ON %s.session_id = p.session_id AND %s.packet_id = p.packet_id",
-				c.tableRef(components.ComponentTable(proto)), alias, alias, alias),
-		)
+type PacketDetails struct {
+	ComponentsMask string         `json:"components_mask"`
+	Components     map[string]any `json:"components"`
+}
+
+// QueryPacketDetails fetches one packet's metadata and parsed component fields,
+// returning only the components that are actually present in the packet bitmask.
+func (c *Client) QueryPacketDetails(ctx context.Context, sessionID uint64, packetID uint32) (*PacketDetails, error) {
+	q := fmt.Sprintf(
+		`SELECT p.session_id, p.packet_id, p.ts, p.incl_len, p.trunc_extra, p.components, lower(hex(p.payload)), captures.sensor
+FROM %s AS p
+LEFT JOIN %s AS captures ON captures.session_id = p.session_id
+WHERE p.session_id = ? AND p.packet_id = ?
+LIMIT 1`,
+		c.packetsTable(), c.capturesTable(),
+	)
+
+	var (
+		rowSessionID uint64
+		rowPacketID  uint32
+		tsNs         int64
+		inclLen      uint32
+		truncExtra   uint32
+		payloadHex   string
+		sensor       string
+	)
+	componentMask := new(big.Int)
+	if err := c.conn.QueryRow(ctx, q, sessionID, packetID).Scan(
+		&rowSessionID,
+		&rowPacketID,
+		&tsNs,
+		&inclLen,
+		&truncExtra,
+		componentMask,
+		&payloadHex,
+		&sensor,
+	); err != nil {
+		if err == io.EOF {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetch packet details: %w", err)
 	}
 
-	var sb strings.Builder
-	sb.WriteString("SELECT\n    ")
-	sb.WriteString(strings.Join(selectParts, ",\n    "))
-	fmt.Fprintf(&sb, "\nFROM %s AS p", c.packetsTable())
-	for _, j := range joins {
-		sb.WriteString("\n")
-		sb.WriteString(j)
+	nucleus := components.PacketNucleus{
+		SessionID:  rowSessionID,
+		PacketID:   rowPacketID,
+		Timestamp:  time.Unix(0, tsNs),
+		InclLen:    inclLen,
+		OrigLen:    inclLen + truncExtra,
+		Components: componentMask,
+		Payload:    []byte(payloadHex),
 	}
-	fmt.Fprintf(&sb, "\nWHERE p.session_id = %d AND p.packet_id = %d", sessionID, packetID)
-	sb.WriteString("\nLIMIT 1")
 
-	rows, err := c.queryJSON(ctx, sb.String())
+	all, err := c.fetchComponentsForBatch(ctx, rowSessionID, []uint32{rowPacketID})
 	if err != nil {
-		return nil, fmt.Errorf("execute packet components: %w", err)
+		return nil, fmt.Errorf("fetch packet detail components: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	componentList, err := resolveComponents(nucleus, all)
+	if err != nil {
+		return nil, fmt.Errorf("resolve packet detail components: %w", err)
 	}
-	return rows[0], nil
+
+	out := &PacketDetails{
+		ComponentsMask: componentMask.String(),
+		Components: map[string]any{
+			"packet": map[string]any{
+				"session_id":   strconv.FormatUint(rowSessionID, 10),
+				"packet_id":    rowPacketID,
+				"timestamp_ns": tsNs,
+				"incl_len":     inclLen,
+				"orig_len":     inclLen + truncExtra,
+				"payload":      payloadHex,
+				"sensor":       sensor,
+			},
+		},
+	}
+	for _, comp := range componentList {
+		name, fields, err := nestedComponentFields(comp)
+		if err != nil {
+			return nil, fmt.Errorf("serialize %s packet details: %w", comp.Name(), err)
+		}
+		appendNestedComponent(out.Components, name, fields)
+	}
+	return out, nil
+}
+
+func appendNestedComponent(dst map[string]any, name string, fields map[string]any) {
+	current, ok := dst[name]
+	if !ok {
+		dst[name] = fields
+		return
+	}
+	switch v := current.(type) {
+	case map[string]any:
+		dst[name] = []map[string]any{v, fields}
+	case []map[string]any:
+		dst[name] = append(v, fields)
+	default:
+		dst[name] = fields
+	}
+}
+
+func nestedComponentFields(comp components.Component) (string, map[string]any, error) {
+	cols, err := components.GetClickhouseColumnsFrom(comp)
+	if err != nil {
+		return "", nil, err
+	}
+	vals, err := components.GetClickhouseValuesFrom(comp)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(cols) != len(vals) {
+		return "", nil, fmt.Errorf("component column/value mismatch for %s", comp.Name())
+	}
+
+	name := comp.Name()
+	prefix := name + "_"
+	fields := make(map[string]any, len(cols))
+	for i, col := range cols {
+		switch col {
+		case "session_id", "packet_id", "codec_version":
+			continue
+		}
+		key := col
+		if !strings.HasPrefix(col, prefix) {
+			key = prefix + col
+		}
+		fields[key] = packetDetailJSONValue(vals[i])
+	}
+	return name, fields, nil
+}
+
+func packetDetailJSONValue(v any) any {
+	switch tv := v.(type) {
+	case uint64:
+		return strconv.FormatUint(tv, 10)
+	case []byte:
+		return string(tv)
+	case net.IP:
+		return tv.String()
+	case netip.Addr:
+		return tv.String()
+	default:
+		return v
+	}
 }
 
 // QueryPacketFrame reconstructs the original frame bytes for a single packet.

@@ -295,7 +295,7 @@ func (c *Client) streamExport(
 		tsNs                int64
 		inclLen, truncExtra uint32
 		componentMask       = new(big.Int)
-		payload            string
+		payload             string
 	)
 	nucleusTargets := []any{
 		&sessionID, &packetID, &tsNs,

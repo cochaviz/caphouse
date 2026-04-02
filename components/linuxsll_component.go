@@ -22,8 +22,8 @@ type LinuxSLLComponent struct {
 	L2HdrRaw     []byte `ch:"l2_hdr_raw"`
 }
 
-func (c *LinuxSLLComponent) Kind() uint   { return ComponentLinuxSLL }
-func (c *LinuxSLLComponent) Name() string { return "linuxsll" }
+func (c *LinuxSLLComponent) Kind() uint           { return ComponentLinuxSLL }
+func (c *LinuxSLLComponent) Name() string         { return "linuxsll" }
 func (c *LinuxSLLComponent) Order() uint          { return OrderL2Base }
 func (c *LinuxSLLComponent) Index() uint16        { return c.LayerIndex }
 func (c *LinuxSLLComponent) SetIndex(i uint16)    { c.LayerIndex = i }
