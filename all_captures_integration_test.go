@@ -67,8 +67,8 @@ type captureEntry struct {
 }
 
 type mockMultiCapture struct {
-	captures  map[uint64]*captureEntry
-	nextID    uint64
+	captures map[uint64]*captureEntry
+	nextID   uint64
 }
 
 func newMockMultiCapture(t *testing.T) *mockMultiCapture {

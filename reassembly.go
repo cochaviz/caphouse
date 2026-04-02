@@ -158,9 +158,9 @@ func resolveComponents(
 
 // reconstructedPkt holds a single reconstructed packet ready for export.
 type reconstructedPkt struct {
-	ts   time.Time
-	incl uint32
-	orig uint32
+	ts    time.Time
+	incl  uint32
+	orig  uint32
 	frame []byte
 }
 
@@ -178,7 +178,7 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, sessionID uint64
 		incl          uint32
 		truncExtra    uint32
 		componentMask *big.Int
-		payload      string
+		payload       string
 	}
 	var nuclei []nucleusRow
 	for start := 0; start < len(ranges); start += maxRangesPerQuery {

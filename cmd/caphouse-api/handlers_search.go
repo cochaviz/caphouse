@@ -13,14 +13,14 @@ import (
 // SearchInput is the request body for POST /v1/search.
 type SearchInput struct {
 	Body struct {
-		Query      string   `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
+		Query      string    `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
 		From       time.Time `json:"from,omitempty" doc:"Start of the time window (RFC 3339). Requires 'to'."`
 		To         time.Time `json:"to,omitempty" doc:"End of the time window (RFC 3339). Requires 'from'."`
-		CaptureIDs []string `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
-		Components []string `json:"components,omitempty" doc:"Protocol component tables to include in the result (e.g. ipv4, tcp, udp, dns). Valid values: ethernet, dot1q, linuxsll, ipv4, ipv6, ipv6_ext, tcp, udp, dns, ntp, arp."`
-		Limit      int      `json:"limit,omitempty" doc:"Page size (default: 1000, max: 10000)."`
-		Offset     int      `json:"offset,omitempty" doc:"Number of rows to skip (default: 0)."`
-		Order      string   `json:"order,omitempty" doc:"Timestamp sort direction: 'asc' or 'desc' (default: 'desc')."`
+		CaptureIDs []string  `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
+		Components []string  `json:"components,omitempty" doc:"Protocol component tables to include in the result (e.g. ipv4, tcp, udp, dns). Valid values: ethernet, dot1q, linuxsll, ipv4, ipv6, ipv6_ext, tcp, udp, dns, ntp, arp."`
+		Limit      int       `json:"limit,omitempty" doc:"Page size (default: 1000, max: 10000)."`
+		Offset     int       `json:"offset,omitempty" doc:"Number of rows to skip (default: 0)."`
+		Order      string    `json:"order,omitempty" doc:"Timestamp sort direction: 'asc' or 'desc' (default: 'desc')."`
 	}
 }
 
@@ -35,13 +35,13 @@ type SearchOutput struct {
 // CountsInput is the request body for POST /v1/stats/hist.
 type CountsInput struct {
 	Body struct {
-		Query           string   `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
+		Query           string    `json:"query" required:"true" doc:"ClickHouse WHERE clause, e.g. \"ipv4.dst = '1.1.1.1' and tcp.dst = 443\". An empty string matches all packets."`
 		From            time.Time `json:"from,omitempty" doc:"Start of the time window (RFC 3339). Requires 'to'."`
 		To              time.Time `json:"to,omitempty" doc:"End of the time window (RFC 3339). Requires 'from'."`
-		CaptureIDs      []string `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
-		BinSeconds      int64    `json:"bin_seconds,omitempty" doc:"Bin width in seconds (default: 60, minimum: 1)."`
-		TzOffsetSeconds int64    `json:"tz_offset_seconds,omitempty" doc:"Client UTC offset in seconds (e.g. 7200 for UTC+2). Aligns bins to local midnight."`
-		Breakdown       string   `json:"breakdown,omitempty" doc:"Optional field expression to group the histogram by (e.g. 'ipv4.src', 'tcp.dst', 'ipv4.addr'). When provided, breakdown_bins is populated instead of bins."`
+		CaptureIDs      []string  `json:"capture_ids,omitempty" doc:"Optional list of session IDs (uint64) to restrict the search. Searches all sessions when omitted."`
+		BinSeconds      int64     `json:"bin_seconds,omitempty" doc:"Bin width in seconds (default: 60, minimum: 1)."`
+		TzOffsetSeconds int64     `json:"tz_offset_seconds,omitempty" doc:"Client UTC offset in seconds (e.g. 7200 for UTC+2). Aligns bins to local midnight."`
+		Breakdown       string    `json:"breakdown,omitempty" doc:"Optional field expression to group the histogram by (e.g. 'ipv4.src', 'tcp.dst', 'ipv4.addr'). When provided, breakdown_bins is populated instead of bins."`
 	}
 }
 
@@ -63,7 +63,8 @@ type PacketDetailsInput struct {
 // PacketDetailsOutput is the response for GET /v1/captures/{capture_id}/packets/{packet_id}.
 type PacketDetailsOutput struct {
 	Body struct {
-		Components map[string]any `json:"components" doc:"All parsed component fields for the packet, keyed by column name."`
+		ComponentsMask string         `json:"components_mask" doc:"Packet component bitmask as a decimal string."`
+		Components     map[string]any `json:"components" doc:"Parsed packet details grouped by component name. Only components present on the packet are included."`
 	}
 }
 
@@ -215,7 +216,7 @@ func registerSearchHandlers(api huma.API, client *caphouse.Client) {
 		if err != nil {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid capture_id: %s", err))
 		}
-		pkt, err := client.QueryPacketComponents(ctx, sessionID, input.PacketID)
+		pkt, err := client.QueryPacketDetails(ctx, sessionID, input.PacketID)
 		if err != nil {
 			if cerr := clientGone(ctx, err); cerr != nil {
 				return nil, cerr
@@ -229,7 +230,8 @@ func registerSearchHandlers(api huma.API, client *caphouse.Client) {
 			return nil, huma.Error404NotFound("packet not found")
 		}
 		out := &PacketDetailsOutput{}
-		out.Body.Components = pkt
+		out.Body.ComponentsMask = pkt.ComponentsMask
+		out.Body.Components = pkt.Components
 		return out, nil
 	})
 

@@ -146,7 +146,6 @@ func TestParse_FieldAlias_In(t *testing.T) {
 	}
 }
 
-
 func TestParse_BareComponent(t *testing.T) {
 	f, err := Parse("dns")
 	if err != nil {
