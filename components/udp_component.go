@@ -18,6 +18,7 @@ type UDPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
+	LayerIndex   uint16 `ch:"layer_index"`
 
 	SrcPort  uint16 `ch:"src"`
 	DstPort  uint16 `ch:"dst"`
@@ -28,8 +29,8 @@ type UDPComponent struct {
 func (c *UDPComponent) Kind() uint           { return ComponentUDP }
 func (c *UDPComponent) Name() string         { return "udp" }
 func (c *UDPComponent) Order() uint          { return OrderL4Base }
-func (c *UDPComponent) Index() uint16        { return 0 }
-func (c *UDPComponent) SetIndex(_ uint16)    {}
+func (c *UDPComponent) Index() uint16        { return c.LayerIndex }
+func (c *UDPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *UDPComponent) HeaderLen() int       { return 8 }
 func (c *UDPComponent) FetchOrderBy() string { return "packet_id" }
 
@@ -84,6 +85,7 @@ func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *UDPComponent) Schema(table string) string { return applySchema(udpSchemaSQL, table) }
 func (c *UDPComponent) Indexes(table string) []string {
 	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 	}
 }

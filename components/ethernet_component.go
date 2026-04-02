@@ -3,6 +3,7 @@ package components
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"net"
 
 	"github.com/google/gopacket"
@@ -17,6 +18,7 @@ type EthernetComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
+	LayerIndex   uint16 `ch:"layer_index"`
 	SrcMAC       []byte `ch:"src"`
 	DstMAC       []byte `ch:"dst"`
 	EtherType    uint16 `ch:"type"`
@@ -26,8 +28,8 @@ type EthernetComponent struct {
 func (c *EthernetComponent) Kind() uint           { return ComponentEthernet }
 func (c *EthernetComponent) Name() string         { return "ethernet" }
 func (c *EthernetComponent) Order() uint          { return OrderL2Base }
-func (c *EthernetComponent) Index() uint16        { return 0 }
-func (c *EthernetComponent) SetIndex(_ uint16)    {}
+func (c *EthernetComponent) Index() uint16        { return c.LayerIndex }
+func (c *EthernetComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *EthernetComponent) HeaderLen() int       { return 14 }
 func (c *EthernetComponent) FetchOrderBy() string { return "packet_id" }
 
@@ -88,4 +90,8 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *EthernetComponent) Schema(table string) string { return applySchema(ethernetSchemaSQL, table) }
-func (c *EthernetComponent) Indexes(_ string) []string  { return nil }
+func (c *EthernetComponent) Indexes(table string) []string {
+	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
+	}
+}

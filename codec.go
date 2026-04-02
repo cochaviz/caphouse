@@ -12,9 +12,8 @@ import (
 )
 
 // encodePacket parses a raw frame into a codecPacket whose Components slice
-// holds one entry per recognised protocol layer. Layers that cannot be decoded,
-// or frames whose layer structure violates basic sanity checks (e.g. L4 without
-// L3), fall back to storing the full raw frame in the nucleus instead.
+// holds one entry per recognised protocol layer. Layers that cannot be decoded
+// fall back to storing the full raw frame in the nucleus instead.
 func encodePacket(linkType uint32, p Packet) codecPacket {
 	frame := copyBytes(p.Frame)
 	mask := components.NewComponentMask()
@@ -41,47 +40,24 @@ func encodePacket(linkType uint32, p Packet) codecPacket {
 	}
 
 	componentList := []components.Component{}
-	orderCounts := map[uint]uint16{}
 
-	for _, layer := range layerList {
+	for count, layer := range layerList {
 		encoder, ok := components.LayerEncoders[layer.LayerType()]
 		if !ok {
-			continue
+			break
 		}
 		layerComponents, err := encoder.Encode(layer)
 		if err != nil {
-			// Skip layers that cannot be encoded (e.g. gopacket returns a
-			// zero-content layer for a truncated L4 header). The post-loop
-			// validation catches missing L2/L3 and triggers rawFrameFallback.
 			continue
 		}
 		for _, component := range layerComponents {
 			if component == nil {
 				continue
 			}
-			order := component.Order()
-			count := orderCounts[order]
-			if !components.OrderRepeatable[order] && count > 0 {
-				return rawFrameFallback(nucleus, frame)
-			}
-			component.SetIndex(count)
+			component.SetIndex(uint16(count))
 			component.ApplyNucleus(nucleus)
-			orderCounts[order] = count + 1
 			componentList = append(componentList, component)
 		}
-	}
-
-	if requiresL2(linkType) && orderCounts[components.OrderL2Base] == 0 {
-		return rawFrameFallback(nucleus, frame)
-	}
-	if orderCounts[components.OrderL2Tag] > 0 && orderCounts[components.OrderL2Base] == 0 {
-		return rawFrameFallback(nucleus, frame)
-	}
-	if orderCounts[components.OrderL3Ext] > 0 && orderCounts[components.OrderL3Base] == 0 {
-		return rawFrameFallback(nucleus, frame)
-	}
-	if orderCounts[components.OrderL4Base] > 0 && orderCounts[components.OrderL3Base] == 0 {
-		return rawFrameFallback(nucleus, frame)
 	}
 
 	tailOffset := 0
@@ -124,14 +100,12 @@ func reconstructFrame(nucleus components.PacketNucleus, comps []components.Compo
 	}
 
 	kindCounts := map[uint]int{}
-	orderCounts := map[uint]int{}
 	for _, component := range comps {
 		if component == nil {
 			continue
 		}
 		kind := component.Kind()
 		kindCounts[kind]++
-		orderCounts[component.Order()]++
 		if !components.ComponentHas(nucleus.Components, kind) {
 			return nil, fmt.Errorf("component kind %d present without bit set", kind)
 		}
@@ -140,11 +114,6 @@ func reconstructFrame(nucleus components.PacketNucleus, comps []components.Compo
 	for _, kind := range components.KnownComponentKinds {
 		if components.ComponentHas(nucleus.Components, kind) && kindCounts[kind] == 0 {
 			return nil, fmt.Errorf("missing component kind %d", kind)
-		}
-	}
-	for order, count := range orderCounts {
-		if !components.OrderRepeatable[order] && count > 1 {
-			return nil, fmt.Errorf("duplicate component order %d", order)
 		}
 	}
 
@@ -157,13 +126,7 @@ func reconstructFrame(nucleus components.PacketNucleus, comps []components.Compo
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a := sorted[i]
 		b := sorted[j]
-		if a.Order() != b.Order() {
-			return a.Order() < b.Order()
-		}
-		if a.Index() != b.Index() {
-			return a.Index() < b.Index()
-		}
-		return a.Kind() < b.Kind()
+		return a.Index() < b.Index()
 	})
 
 	ctx := components.DecodeContext{

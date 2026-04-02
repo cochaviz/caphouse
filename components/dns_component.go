@@ -22,6 +22,7 @@ type DNSComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
+	LayerIndex   uint16 `ch:"layer_index"`
 
 	TransactionID uint16 `ch:"transaction_id"`
 	QR            uint8  `ch:"qr"` // 0=query 1=response
@@ -63,8 +64,8 @@ type DNSComponent struct {
 func (c *DNSComponent) Kind() uint           { return ComponentDNS }
 func (c *DNSComponent) Name() string         { return "dns" }
 func (c *DNSComponent) Order() uint          { return OrderL7Base }
-func (c *DNSComponent) Index() uint16        { return 0 }
-func (c *DNSComponent) SetIndex(_ uint16)    {}
+func (c *DNSComponent) Index() uint16        { return c.LayerIndex }
+func (c *DNSComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *DNSComponent) HeaderLen() int       { return len(c.buildDNSWire()) }
 func (c *DNSComponent) FetchOrderBy() string { return "packet_id" }
 
@@ -175,6 +176,7 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *DNSComponent) Schema(table string) string { return applySchema(dnsSchemaSQL, table) }
 func (c *DNSComponent) Indexes(table string) []string {
 	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
 		// Drop the old invalid bloom filter on the nested-array column (if it exists).
 		fmt.Sprintf("ALTER TABLE %s DROP INDEX IF EXISTS idx_answers_ip", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_questions_name (questions_name) TYPE bloom_filter GRANULARITY 4", table),

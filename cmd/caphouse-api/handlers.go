@@ -78,4 +78,5 @@ func registerAllHandlers(api huma.API, client *caphouse.Client, anthropicKey str
 	registerExportHandlers(api, client)
 	registerStreamsHandlers(api, client)
 	registerQueryHandlers(api, client, anthropicKey)
+	registerAdminHandlers(api, client)
 }

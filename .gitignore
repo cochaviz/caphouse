@@ -1,6 +1,6 @@
 # testing
 testresults/
-testdata/
+testdata*/
 *.pcap
 
 # build artifacts
@@ -10,9 +10,11 @@ completions/
 
 # agents
 .claude/
+.codex
 
 # dev
 .zed/
 tmp/
+.vscode/
 
 .env
