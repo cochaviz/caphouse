@@ -30,13 +30,15 @@ type IPv6Component struct {
 	IPv6HopLimit     uint8  `ch:"hop_limit"`
 	IPv6FlowLabel    uint32 `ch:"flow_label"`
 	IPv6TrafficClass uint8  `ch:"traffic_class"`
+
+	LayerIndex uint16 `ch:"layer_index"`
 }
 
 func (c *IPv6Component) Kind() uint           { return ComponentIPv6 }
 func (c *IPv6Component) Name() string         { return "ipv6" }
 func (c *IPv6Component) Order() uint          { return OrderL3Base }
-func (c *IPv6Component) Index() uint16        { return 0 }
-func (c *IPv6Component) SetIndex(_ uint16)    {}
+func (c *IPv6Component) Index() uint16        { return c.LayerIndex }
+func (c *IPv6Component) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *IPv6Component) HeaderLen() int       { return 40 }
 func (c *IPv6Component) FetchOrderBy() string { return "packet_id" }
 
@@ -108,6 +110,7 @@ func (c *IPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *IPv6Component) Schema(table string) string { return applySchema(ipv6SchemaSQL, table) }
 func (c *IPv6Component) Indexes(table string) []string {
 	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),
 	}

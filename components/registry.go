@@ -20,6 +20,9 @@ const (
 	ComponentDNS
 	ComponentNTP
 	ComponentARP
+	ComponentICMPv4
+	ComponentICMPv6
+	ComponentGRE
 )
 
 var KnownComponentKinds = []uint{
@@ -34,6 +37,9 @@ var KnownComponentKinds = []uint{
 	ComponentDNS,
 	ComponentNTP,
 	ComponentARP,
+	ComponentICMPv4,
+	ComponentICMPv6,
+	ComponentGRE,
 }
 
 var LayerEncoders = map[gopacket.LayerType]Component{
@@ -51,6 +57,9 @@ var LayerEncoders = map[gopacket.LayerType]Component{
 	layers.LayerTypeDNS:             &DNSComponent{},
 	layers.LayerTypeNTP:             &NTPComponent{},
 	layers.LayerTypeARP:             &ARPComponent{},
+	layers.LayerTypeICMPv4:          &ICMPv4Component{},
+	layers.LayerTypeICMPv6:          &ICMPv6Component{},
+	layers.LayerTypeGRE:             &GREComponent{},
 }
 
 func LayerSupported(layerType gopacket.LayerType) bool {
@@ -71,4 +80,7 @@ var ComponentFactories = map[uint]func() Component{
 	ComponentDNS:      func() Component { return &DNSComponent{} },
 	ComponentNTP:      func() Component { return &NTPComponent{} },
 	ComponentARP:      func() Component { return &ARPComponent{} },
+	ComponentICMPv4:   func() Component { return &ICMPv4Component{} },
+	ComponentICMPv6:   func() Component { return &ICMPv6Component{} },
+	ComponentGRE:      func() Component { return &GREComponent{} },
 }

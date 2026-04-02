@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
 
 // packetReader abstracts over pcapgo.Reader and pcapgo.NgReader.
@@ -42,7 +41,7 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse global header: %v", err)
 			}
-			meta.CaptureID = uuid.New()
+			meta.SessionID = 1
 			meta.GlobalHeaderRaw = input[:24]
 
 			reader, err := pcapgo.NewReader(bytes.NewReader(input))
@@ -68,7 +67,7 @@ func TestPCAPFileRoundTrip(t *testing.T) {
 func ingestAll(t *testing.T, client *mockClient, linkType uint32, reader packetReader) [][]byte {
 	t.Helper()
 	var frames [][]byte
-	var packetID uint64
+	var packetID uint32
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if err == io.EOF {
@@ -82,7 +81,7 @@ func ingestAll(t *testing.T, client *mockClient, linkType uint32, reader packetR
 		frames = append(frames, copied)
 
 		if err := client.IngestPacket(linkType, Packet{
-			CaptureID: client.meta.CaptureID,
+			SessionID: client.meta.SessionID,
 			PacketID:  packetID,
 			Timestamp: ci.Timestamp,
 			InclLen:   uint32(ci.CaptureLength),

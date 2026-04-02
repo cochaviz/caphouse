@@ -4,14 +4,32 @@ package caphouse
 
 import (
 	"bytes"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
+
+// timedPacketRef is a lightweight pointer into a capture's packet set,
+// carrying the absolute nanosecond timestamp needed for merge-sort ordering.
+type timedPacketRef struct {
+	captureID uint64
+	packetID  uint64
+	absNs     int64
+}
+
+// sortTimedRefs sorts refs by ascending absNs, breaking ties by captureID.
+func sortTimedRefs(refs []timedPacketRef) {
+	sort.SliceStable(refs, func(i, j int) bool {
+		if refs[i].absNs != refs[j].absNs {
+			return refs[i].absNs < refs[j].absNs
+		}
+		return refs[i].captureID < refs[j].captureID
+	})
+}
 
 // buildSimplePCAP creates an in-memory classic LE/µs Ethernet PCAP from the
 // given (timestamp, frame) pairs.
@@ -49,16 +67,17 @@ type captureEntry struct {
 }
 
 type mockMultiCapture struct {
-	captures map[uuid.UUID]*captureEntry
+	captures  map[uint64]*captureEntry
+	nextID    uint64
 }
 
 func newMockMultiCapture(t *testing.T) *mockMultiCapture {
 	t.Helper()
-	return &mockMultiCapture{captures: make(map[uuid.UUID]*captureEntry)}
+	return &mockMultiCapture{captures: make(map[uint64]*captureEntry), nextID: 1}
 }
 
 // ingest ingests pcapData and returns the assigned capture ID.
-func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string) uuid.UUID {
+func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string) uint64 {
 	t.Helper()
 	if len(pcapData) < 24 {
 		t.Fatalf("ingest %s: pcap too short", filename)
@@ -67,7 +86,8 @@ func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string
 	if err != nil {
 		t.Fatalf("ingest %s: ParseGlobalHeader: %v", filename, err)
 	}
-	meta.CaptureID = uuid.New()
+	meta.SessionID = m.nextID
+	m.nextID++
 	meta.Sensor = "test"
 
 	r, err := pcapgo.NewReader(bytes.NewReader(pcapData))
@@ -90,7 +110,6 @@ func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string
 	if len(rawPkts) == 0 {
 		t.Fatalf("ingest %s: no packets", filename)
 	}
-	meta.CreatedAt = rawPkts[0].ts
 
 	entry := &captureEntry{
 		meta:    meta,
@@ -104,12 +123,12 @@ func (m *mockMultiCapture) ingest(t *testing.T, pcapData []byte, filename string
 			frame: p.frame,
 		}
 	}
-	m.captures[meta.CaptureID] = entry
-	return meta.CaptureID
+	m.captures[meta.SessionID] = entry
+	return meta.SessionID
 }
 
-func (m *mockMultiCapture) captureMap() map[uuid.UUID]CaptureMeta {
-	cm := make(map[uuid.UUID]CaptureMeta, len(m.captures))
+func (m *mockMultiCapture) captureMap() map[uint64]CaptureMeta {
+	cm := make(map[uint64]CaptureMeta, len(m.captures))
 	for id, e := range m.captures {
 		cm[id] = e.meta
 	}
@@ -188,21 +207,21 @@ func TestExportAllSortOrder(t *testing.T) {
 	for i, ref := range refs {
 		entry := mc.captures[ref.captureID]
 		if entry == nil {
-			t.Fatalf("ref %d: unknown capture %s", i, ref.captureID)
+			t.Fatalf("ref %d: unknown capture %d", i, ref.captureID)
 		}
 		pkt := entry.packets[ref.packetID]
 		if !bytes.Equal(pkt.frame, wantFrames[i]) {
-			t.Errorf("refs[%d] (cap=%s, pkt=%d): frame %x, want %x",
+			t.Errorf("refs[%d] (cap=%d, pkt=%d): frame %x, want %x",
 				i, ref.captureID, ref.packetID, pkt.frame, wantFrames[i])
 		}
 		_ = captureMap
 	}
 }
 
-// TestExportAllTieBreakByCaptureID verifies that when two packets have the
+// TestExportAllTieBreakBySessionID verifies that when two packets have the
 // same absolute timestamp, the one from the lexicographically smaller capture
 // UUID appears first.
-func TestExportAllTieBreakByCaptureID(t *testing.T) {
+func TestExportAllTieBreakBySessionID(t *testing.T) {
 	epoch := time.Unix(1_700_001_000, 0).UTC()
 	frame := func(b byte) []byte { return []byte{b, b, b, b} }
 
@@ -232,15 +251,11 @@ func TestExportAllTieBreakByCaptureID(t *testing.T) {
 		t.Fatalf("got %d refs, want 2", len(refs))
 	}
 
-	// The capture with the lexicographically smaller UUID string must come first.
-	var wantFirst uuid.UUID
-	if idA.String() < idB.String() {
-		wantFirst = idA
-	} else {
-		wantFirst = idB
-	}
+	// The capture with the small SessionID has to be first
+	wantFirst := min(idA, idB)
+
 	if refs[0].captureID != wantFirst {
-		t.Errorf("tie-break failed: refs[0].captureID = %s, want smaller UUID %s", refs[0].captureID, wantFirst)
+		t.Errorf("tie-break failed: refs[0].captureID = %d, want smaller session ID %d", refs[0].captureID, wantFirst)
 	}
 }
 

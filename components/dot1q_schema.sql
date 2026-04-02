@@ -6,11 +6,11 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   codec_version UInt16,
 
-  tag_index     UInt16,
+  layer_index   UInt16 CODEC(Delta, LZ4),
   priority      UInt8,
   drop_eligible UInt8,
   vlan_id       UInt16,
   type          UInt16
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (session_id, packet_id, tag_index)
+ORDER BY (session_id, packet_id, layer_index)

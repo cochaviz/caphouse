@@ -1017,10 +1017,12 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 		t.Fatalf("expected 2 dot1q components, got %d", len(tags))
 	}
 	seen := map[uint16]bool{
-		tags[0].TagIndex: true,
-		tags[1].TagIndex: true,
+		tags[0].LayerIndex: true,
+		tags[1].LayerIndex: true,
 	}
-	if !seen[0] || !seen[1] {
+	// eth should have position 0, then tags should be position
+	// 1 and 2
+	if !seen[1] || !seen[2] {
 		t.Fatalf("dot1q tag indexes not set")
 	}
 
@@ -1086,7 +1088,7 @@ func TestCodecIPv4TCP(t *testing.T) {
 	}
 }
 
-func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
+func TestCodecIPv6ICMPv6Component(t *testing.T) {
 	payload := bytes.Repeat([]byte{0x6b}, 16)
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0xde, 0xad, 0xbe, 0xef, 0x01, 0x02},
@@ -1127,6 +1129,10 @@ func TestCodecIPv6ICMPStaysRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentIPv6) {
 		t.Fatalf("expected ipv6 component")
 	}
+	if !hasComponentKind(encoded.Components, components.ComponentICMPv6) {
+		t.Fatalf("expected icmpv6 component")
+	}
+	// ICMPv6 fixed header (4 bytes) is now a component; only the echo body + payload remain as tail.
 	if !bytes.Equal(encoded.Nucleus.Payload, frame[encoded.Nucleus.TailOffset:]) {
 		t.Fatalf("raw tail mismatch")
 	}

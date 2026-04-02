@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/uuid"
 )
 
 // TestParseNgCaptureMeta verifies that ParseNgCaptureMeta extracts correct
@@ -70,7 +69,7 @@ func TestPcapNgToClassicRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseNgCaptureMeta: %v", err)
 			}
-			meta.CaptureID = uuid.New()
+			meta.SessionID = 1
 			client := newMockClient(meta)
 			wantFrames := ingestAll(t, client, meta.LinkType, ngr)
 

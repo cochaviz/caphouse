@@ -17,6 +17,7 @@ type LinuxSLLComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
+	LayerIndex   uint16 `ch:"layer_index"`
 	L2Len        uint16 `ch:"l2_len"`
 	L2HdrRaw     []byte `ch:"l2_hdr_raw"`
 }
@@ -24,8 +25,8 @@ type LinuxSLLComponent struct {
 func (c *LinuxSLLComponent) Kind() uint   { return ComponentLinuxSLL }
 func (c *LinuxSLLComponent) Name() string { return "linuxsll" }
 func (c *LinuxSLLComponent) Order() uint          { return OrderL2Base }
-func (c *LinuxSLLComponent) Index() uint16        { return 0 }
-func (c *LinuxSLLComponent) SetIndex(_ uint16)    {}
+func (c *LinuxSLLComponent) Index() uint16        { return c.LayerIndex }
+func (c *LinuxSLLComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *LinuxSLLComponent) HeaderLen() int       { return len(c.L2HdrRaw) }
 func (c *LinuxSLLComponent) FetchOrderBy() string { return "packet_id" }
 
@@ -78,4 +79,8 @@ func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *LinuxSLLComponent) Schema(table string) string { return applySchema(linuxsllSchemaSQL, table) }
-func (c *LinuxSLLComponent) Indexes(_ string) []string  { return nil }
+func (c *LinuxSLLComponent) Indexes(table string) []string {
+	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
+	}
+}

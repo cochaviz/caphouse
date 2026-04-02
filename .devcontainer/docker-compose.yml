@@ -21,13 +21,13 @@ services:
         working_dir: /workspace/caphouse-ui
         command: sh -c "npm install && npm run dev"
         ports:
-            - "8080:8080"
+            - "8088:8080"
 
     clickhouse:
         image: clickhouse/clickhouse-server
-        ports:
-            - "8123:8123"
-            - "9000:9000"
+        expose:
+            - 8123
+            - 9000
         environment:
             CLICKHOUSE_DB: default
             CLICKHOUSE_USER: default

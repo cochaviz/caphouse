@@ -6,9 +6,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   codec_version UInt16,
 
-  ext_index UInt16,
+  layer_index UInt16 CODEC(Delta, LZ4),
   ext_type  UInt16,
   ext_raw   String CODEC(ZSTD)
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (session_id, packet_id, ext_index)
+ORDER BY (session_id, packet_id, layer_index)

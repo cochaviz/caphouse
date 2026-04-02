@@ -107,6 +107,7 @@ func (c *Client) SearchSQL(f Filter, sessionIDs []uint64, comps []string, limit,
 	} else {
 		sb.WriteString("\nORDER BY timestamp_ns DESC")
 	}
+	sb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
 	return sb.String(), nil
 }
 

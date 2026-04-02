@@ -3,6 +3,7 @@ package components
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 
 	"github.com/google/gopacket"
 )
@@ -15,22 +16,22 @@ type IPv6ExtComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
-	ExtIndex     uint16 `ch:"ext_index"`
+	LayerIndex   uint16 `ch:"layer_index"`
 	ExtType      uint16 `ch:"ext_type"`
 	ExtRaw       []byte `ch:"ext_raw"`
 
 	// export scan buffers — populated from groupArray CTE columns
-	exportExtIndex []uint16
-	exportExtType  []uint16
-	exportExtRaw   []string // groupArray of a String column yields []string
+	exportLayerIndex []uint16
+	exportExtType    []uint16
+	exportExtRaw     []string // groupArray of a String column yields []string
 }
 
 func (c *IPv6ExtComponent) Kind() uint           { return ComponentIPv6Ext }
 func (c *IPv6ExtComponent) Name() string         { return "ipv6_ext" }
 func (c *IPv6ExtComponent) Order() uint          { return OrderL3Ext }
-func (c *IPv6ExtComponent) Index() uint16        { return c.ExtIndex }
-func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.ExtIndex = i }
-func (c *IPv6ExtComponent) FetchOrderBy() string { return "packet_id, ext_index" }
+func (c *IPv6ExtComponent) Index() uint16        { return c.LayerIndex }
+func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.LayerIndex = i }
+func (c *IPv6ExtComponent) FetchOrderBy() string { return "packet_id, layer_index" }
 
 func (c *IPv6ExtComponent) HeaderLen() int {
 	if len(c.ExtRaw) < 2 {
@@ -84,24 +85,28 @@ func (c *IPv6ExtComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *IPv6ExtComponent) ExportScanTargets() []any {
-	// Order matches DataColumns("ipv6_ext"): ext_index, ext_type, ext_raw
+	// Order matches DataColumns("ipv6_ext"): layer_index, ext_type, ext_raw
 	// Each target is a slice that receives a groupArray result.
-	return []any{&c.exportExtIndex, &c.exportExtType, &c.exportExtRaw}
+	return []any{&c.exportLayerIndex, &c.exportExtType, &c.exportExtRaw}
 }
 
 func (c *IPv6ExtComponent) ExportExpand(sessionID uint64, packetID uint32) []Component {
-	out := make([]Component, len(c.exportExtIndex))
-	for i := range c.exportExtIndex {
+	out := make([]Component, len(c.exportLayerIndex))
+	for i := range c.exportLayerIndex {
 		out[i] = &IPv6ExtComponent{
-			SessionID: sessionID,
-			PacketID:  packetID,
-			ExtIndex:  c.exportExtIndex[i],
-			ExtType:   c.exportExtType[i],
-			ExtRaw:    []byte(c.exportExtRaw[i]),
+			SessionID:  sessionID,
+			PacketID:   packetID,
+			LayerIndex: c.exportLayerIndex[i],
+			ExtType:    c.exportExtType[i],
+			ExtRaw:     []byte(c.exportExtRaw[i]),
 		}
 	}
 	return out
 }
 
 func (c *IPv6ExtComponent) Schema(table string) string { return applySchema(ipv6ExtSchemaSQL, table) }
-func (c *IPv6ExtComponent) Indexes(_ string) []string  { return nil }
+func (c *IPv6ExtComponent) Indexes(table string) []string {
+	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
+	}
+}

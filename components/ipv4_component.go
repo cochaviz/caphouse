@@ -36,13 +36,15 @@ type IPv4Component struct {
 	IPv4HdrChecksum uint16 `ch:"hdr_checksum"`
 
 	OptionsRaw []byte `ch:"options_raw"`
+
+	LayerIndex uint16 `ch:"layer_index"`
 }
 
 func (c *IPv4Component) Kind() uint           { return ComponentIPv4 }
 func (c *IPv4Component) Name() string         { return "ipv4" }
 func (c *IPv4Component) Order() uint          { return OrderL3Base }
-func (c *IPv4Component) Index() uint16        { return 0 }
-func (c *IPv4Component) SetIndex(_ uint16)    {}
+func (c *IPv4Component) Index() uint16        { return c.LayerIndex }
+func (c *IPv4Component) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *IPv4Component) HeaderLen() int       { return 20 + len(c.OptionsRaw) }
 func (c *IPv4Component) FetchOrderBy() string { return "packet_id" }
 
@@ -149,6 +151,7 @@ func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
 func (c *IPv4Component) Schema(table string) string { return applySchema(ipv4SchemaSQL, table) }
 func (c *IPv4Component) Indexes(table string) []string {
 	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),
 	}

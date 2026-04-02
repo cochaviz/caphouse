@@ -22,6 +22,10 @@ type mockClient struct {
 	udp      map[uint32]*components.UDPComponent
 	dns      map[uint32]*components.DNSComponent
 	ntp      map[uint32]*components.NTPComponent
+	arp      map[uint32]*components.ARPComponent
+	gre      map[uint32]*components.GREComponent
+	icmpv4   map[uint32]*components.ICMPv4Component
+	icmpv6   map[uint32]*components.ICMPv6Component
 }
 
 func newMockClient(meta CaptureMeta) *mockClient {
@@ -50,6 +54,10 @@ func newMockClient(meta CaptureMeta) *mockClient {
 		udp:      map[uint32]*components.UDPComponent{},
 		dns:      map[uint32]*components.DNSComponent{},
 		ntp:      map[uint32]*components.NTPComponent{},
+		arp:      map[uint32]*components.ARPComponent{},
+		gre:      map[uint32]*components.GREComponent{},
+		icmpv4:   map[uint32]*components.ICMPv4Component{},
+		icmpv6:   map[uint32]*components.ICMPv6Component{},
 	}
 }
 
@@ -79,6 +87,14 @@ func (m *mockClient) IngestPacket(linkType uint32, p Packet) error {
 			m.dns[p.PacketID] = component
 		case *components.NTPComponent:
 			m.ntp[p.PacketID] = component
+		case *components.ARPComponent:
+			m.arp[p.PacketID] = component
+		case *components.GREComponent:
+			m.gre[p.PacketID] = component
+		case *components.ICMPv4Component:
+			m.icmpv4[p.PacketID] = component
+		case *components.ICMPv6Component:
+			m.icmpv6[p.PacketID] = component
 		}
 	}
 	return nil
@@ -128,6 +144,18 @@ func (m *mockClient) ExportCaptureBytes() ([]byte, error) {
 			componentsList = append(componentsList, comp)
 		}
 		if comp := m.ntp[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.arp[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.gre[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.icmpv4[id]; comp != nil {
+			componentsList = append(componentsList, comp)
+		}
+		if comp := m.icmpv6[id]; comp != nil {
 			componentsList = append(componentsList, comp)
 		}
 

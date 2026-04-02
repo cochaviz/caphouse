@@ -3,6 +3,7 @@ package components
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -17,6 +18,7 @@ type NTPComponent struct {
 	SessionID    uint64 `ch:"session_id"`
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
+	LayerIndex   uint16 `ch:"layer_index"`
 
 	LeapIndicator  uint8  `ch:"leap_indicator"`
 	Version        uint8  `ch:"version"`
@@ -39,8 +41,8 @@ type NTPComponent struct {
 func (c *NTPComponent) Kind() uint           { return ComponentNTP }
 func (c *NTPComponent) Name() string         { return "ntp" }
 func (c *NTPComponent) Order() uint          { return OrderL7Base }
-func (c *NTPComponent) Index() uint16        { return 0 }
-func (c *NTPComponent) SetIndex(_ uint16)    {}
+func (c *NTPComponent) Index() uint16        { return c.LayerIndex }
+func (c *NTPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *NTPComponent) HeaderLen() int       { return len(c.NTPRaw) }
 func (c *NTPComponent) FetchOrderBy() string { return "packet_id" }
 
@@ -100,4 +102,8 @@ func (c *NTPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *NTPComponent) Schema(table string) string { return applySchema(ntpSchemaSQL, table) }
-func (c *NTPComponent) Indexes(_ string) []string  { return nil }
+func (c *NTPComponent) Indexes(table string) []string {
+	return []string{
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
+	}
+}
