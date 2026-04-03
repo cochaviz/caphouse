@@ -151,12 +151,31 @@ func TestParse_BareComponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if f.Clause != "1 = 1" {
-		t.Errorf("bare component clause: got %q, want %q", f.Clause, "1 = 1")
+	// Bare component names are rewritten to a bitmask check so they can be
+	// combined with OR without forcing an INNER JOIN.
+	wantClause := "bitAnd(toUInt64(p.components), 2048) != 0"
+	if f.Clause != wantClause {
+		t.Errorf("bare component clause: got %q, want %q", f.Clause, wantClause)
 	}
-	comps := f.Components()
-	if len(comps) != 1 || comps[0] != "dns" {
-		t.Errorf("components: got %v, want [dns]", comps)
+	// No INNER JOIN needed — the bitmask check runs directly on pcap_packets.
+	if len(f.Components()) != 0 {
+		t.Errorf("components: got %v, want []", f.Components())
+	}
+}
+
+func TestParse_BareComponentOR(t *testing.T) {
+	f, err := Parse("udp or tcp")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Both sides must be bitmask checks so the OR works correctly.
+	// UDP=10 → bit 1024, TCP=9 → bit 512.
+	wantClause := "bitAnd(toUInt64(p.components), 1024) != 0 or bitAnd(toUInt64(p.components), 512) != 0"
+	if f.Clause != wantClause {
+		t.Errorf("clause: got %q, want %q", f.Clause, wantClause)
+	}
+	if len(f.Components()) != 0 {
+		t.Errorf("components: got %v, want []", f.Components())
 	}
 }
 
