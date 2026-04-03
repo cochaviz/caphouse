@@ -37,7 +37,7 @@ func dnsCompressedResponseWire() []byte {
 		0x00, 0x01, // Type A
 		0x00, 0x01, // Class IN
 		0x00, 0x00, 0x01, 0x2C, // TTL = 300
-		0x00, 0x04,             // RDLENGTH = 4
+		0x00, 0x04, // RDLENGTH = 4
 		0x01, 0x02, 0x03, 0x04, // 1.2.3.4
 		// Answer 2 (offset 45): name = \3www ptr→12, A IN TTL=300 5.6.7.8
 		0x03, 'w', 'w', 'w',
@@ -45,7 +45,7 @@ func dnsCompressedResponseWire() []byte {
 		0x00, 0x01, // Type A
 		0x00, 0x01, // Class IN
 		0x00, 0x00, 0x01, 0x2C, // TTL = 300
-		0x00, 0x04,             // RDLENGTH = 4
+		0x00, 0x04, // RDLENGTH = 4
 		0x05, 0x06, 0x07, 0x08, // 5.6.7.8
 	} // total: 65 bytes
 }
@@ -123,6 +123,7 @@ func TestDNSEncodeFlags(t *testing.T) {
 		TC: true, // truncated
 		RD: true, // recursion desired
 		RA: true, // recursion available
+		Z:  0x02,
 	}
 	data := buildDNSBytes(t, dns)
 	parsed := parseDNSLayer(t, data)
@@ -137,17 +138,20 @@ func TestDNSEncodeFlags(t *testing.T) {
 	if got.QR != 1 {
 		t.Errorf("QR: got %d want 1 (response)", got.QR)
 	}
-	if got.Flags&0x08 == 0 {
+	if got.Flags&dnsFlagAA == 0 {
 		t.Error("AA flag not set")
 	}
-	if got.Flags&0x04 == 0 {
+	if got.Flags&dnsFlagTC == 0 {
 		t.Error("TC flag not set")
 	}
-	if got.Flags&0x02 == 0 {
+	if got.Flags&dnsFlagRD == 0 {
 		t.Error("RD flag not set")
 	}
-	if got.Flags&0x01 == 0 {
+	if got.Flags&dnsFlagRA == 0 {
 		t.Error("RA flag not set")
+	}
+	if (got.Flags&dnsFlagZMask)>>dnsFlagZShift != 0x02 {
+		t.Errorf("Z bits in flags: got %d want 2", (got.Flags&dnsFlagZMask)>>dnsFlagZShift)
 	}
 }
 
@@ -441,6 +445,7 @@ func TestReconstructUsesUncompressedPath(t *testing.T) {
 	dns := &layers.DNS{
 		ID: 0x0001,
 		QR: false,
+		Z:  0x02,
 		Questions: []layers.DNSQuestion{
 			{Name: []byte("simple.local"), Type: layers.DNSTypeA, Class: layers.DNSClassIN},
 		},
