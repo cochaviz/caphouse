@@ -37,6 +37,9 @@ var (
 	// bareComponentRe matches standalone component names (no dot context checked separately).
 	bareComponentRe *regexp.Regexp
 
+	// componentBits maps component name → its bit in the p.components bitmask.
+	componentBits map[string]uint64
+
 	// packetDotRe rewrites "packet." → "p." so callers can reference pcap_packets
 	// columns (e.g. packet.payload, packet.ts) without knowing the SQL alias.
 	packetDotRe = regexp.MustCompile(`\bpacket\.`)
@@ -49,12 +52,14 @@ var (
 )
 
 func init() {
-	// Build registry set and name list.
+	// Build registry set, name list, and bitmask map.
 	registryComponents = make(map[string]bool, len(components.KnownComponentKinds))
+	componentBits = make(map[string]uint64, len(components.KnownComponentKinds))
 	names := make([]string, 0, len(components.KnownComponentKinds))
 	for _, kind := range components.KnownComponentKinds {
 		name := components.ComponentFactories[kind]().Name()
 		registryComponents[name] = true
+		componentBits[name] = uint64(1) << kind
 		names = append(names, name)
 	}
 
@@ -542,8 +547,10 @@ func expandFieldAliases(clause string) string {
 	return clause
 }
 
-// extractBareComponents finds standalone component names (not followed by '.'),
-// adds them to compSet, and replaces them in the clause with "1 = 1".
+// extractBareComponents finds standalone component names (not followed by '.') and
+// replaces each with a bitmask presence check on p.components, e.g.
+// "tcp" → "bitAnd(toUInt64(p.components), 512) != 0".
+// This allows bare names to be combined with OR without requiring an INNER JOIN.
 func extractBareComponents(clause string, compSet map[string]bool) string {
 	locs := bareComponentRe.FindAllStringIndex(clause, -1)
 	if len(locs) == 0 {
@@ -561,9 +568,9 @@ func extractBareComponents(clause string, compSet map[string]bool) string {
 			continue
 		}
 		name := clause[start:end]
-		compSet[name] = true
+		bit := componentBits[name]
 		sb.WriteString(clause[prev:start])
-		sb.WriteString("1 = 1")
+		sb.WriteString(fmt.Sprintf("bitAnd(toUInt64(p.components), %d) != 0", bit))
 		prev = end
 	}
 	sb.WriteString(clause[prev:])
