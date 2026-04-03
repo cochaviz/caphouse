@@ -29,7 +29,7 @@ type DNSComponent struct {
 	QR            uint8  `ch:"qr"` // 0=query 1=response
 	Opcode        uint8  `ch:"opcode"`
 	RCode         uint8  `ch:"rcode"`
-	Flags         uint8  `ch:"flags"` // AA|TC|RD|RA packed
+	Flags         uint8  `ch:"flags"` // Z<<4 | AA<<3 | TC<<2 | RD<<1 | RA
 
 	ANCount uint16 `ch:"an_count"`
 	NSCount uint16 `ch:"ns_count"`
@@ -61,6 +61,16 @@ type DNSComponent struct {
 	AdditionalTTL   []uint32 `ch:"additional_ttl"`
 	AdditionalRdata []string `ch:"additional_rdata"`
 }
+
+const (
+	dnsFlagRA uint8 = 0x01
+	dnsFlagRD uint8 = 0x02
+	dnsFlagTC uint8 = 0x04
+	dnsFlagAA uint8 = 0x08
+
+	dnsFlagZMask  uint8 = 0x70
+	dnsFlagZShift       = 4
+)
 
 func (c *DNSComponent) Kind() uint           { return ComponentDNS }
 func (c *DNSComponent) Name() string         { return "dns" }
@@ -116,18 +126,18 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		qr = 1
 	}
 
-	var flags uint8
+	flags := (dns.Z & 0x07) << dnsFlagZShift
 	if dns.AA {
-		flags |= 0x08
+		flags |= dnsFlagAA
 	}
 	if dns.TC {
-		flags |= 0x04
+		flags |= dnsFlagTC
 	}
 	if dns.RD {
-		flags |= 0x02
+		flags |= dnsFlagRD
 	}
 	if dns.RA {
-		flags |= 0x01
+		flags |= dnsFlagRA
 	}
 
 	names := make([]string, len(dns.Questions))
@@ -222,18 +232,19 @@ func (c *DNSComponent) buildDNSWire() []byte {
 		dnsFlags |= 0x8000
 	}
 	dnsFlags |= uint16(c.Opcode&0x0f) << 11
-	if c.Flags&0x08 != 0 {
+	if c.Flags&dnsFlagAA != 0 {
 		dnsFlags |= 0x0400 // AA
 	}
-	if c.Flags&0x04 != 0 {
+	if c.Flags&dnsFlagTC != 0 {
 		dnsFlags |= 0x0200 // TC
 	}
-	if c.Flags&0x02 != 0 {
+	if c.Flags&dnsFlagRD != 0 {
 		dnsFlags |= 0x0100 // RD
 	}
-	if c.Flags&0x01 != 0 {
+	if c.Flags&dnsFlagRA != 0 {
 		dnsFlags |= 0x0080 // RA
 	}
+	dnsFlags |= uint16((c.Flags&dnsFlagZMask)>>dnsFlagZShift) << 4
 	dnsFlags |= uint16(c.RCode & 0x0f)
 
 	buf = binary.BigEndian.AppendUint16(buf, c.TransactionID)
@@ -273,18 +284,19 @@ func (c *DNSComponent) buildCompressedDNSWire() []byte {
 		dnsFlags |= 0x8000
 	}
 	dnsFlags |= uint16(c.Opcode&0x0f) << 11
-	if c.Flags&0x08 != 0 {
+	if c.Flags&dnsFlagAA != 0 {
 		dnsFlags |= 0x0400
 	}
-	if c.Flags&0x04 != 0 {
+	if c.Flags&dnsFlagTC != 0 {
 		dnsFlags |= 0x0200
 	}
-	if c.Flags&0x02 != 0 {
+	if c.Flags&dnsFlagRD != 0 {
 		dnsFlags |= 0x0100
 	}
-	if c.Flags&0x01 != 0 {
+	if c.Flags&dnsFlagRA != 0 {
 		dnsFlags |= 0x0080
 	}
+	dnsFlags |= uint16((c.Flags&dnsFlagZMask)>>dnsFlagZShift) << 4
 	dnsFlags |= uint16(c.RCode & 0x0f)
 
 	buf = binary.BigEndian.AppendUint16(buf, c.TransactionID)
