@@ -27,7 +27,7 @@ func (c *LinuxSLLComponent) Name() string         { return "linuxsll" }
 func (c *LinuxSLLComponent) Order() uint          { return OrderL2Base }
 func (c *LinuxSLLComponent) Index() uint16        { return c.LayerIndex }
 func (c *LinuxSLLComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *LinuxSLLComponent) HeaderLen() int       { return len(c.L2HdrRaw) }
+func (c *LinuxSLLComponent) LayerSize() int       { return len(c.L2HdrRaw) }
 func (c *LinuxSLLComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *LinuxSLLComponent) ClickhouseColumns() ([]string, error) {

@@ -31,7 +31,7 @@ func (c *UDPComponent) Name() string         { return "udp" }
 func (c *UDPComponent) Order() uint          { return OrderL4Base }
 func (c *UDPComponent) Index() uint16        { return c.LayerIndex }
 func (c *UDPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *UDPComponent) HeaderLen() int       { return 8 }
+func (c *UDPComponent) LayerSize() int       { return 8 }
 func (c *UDPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *UDPComponent) ClickhouseColumns() ([]string, error) {

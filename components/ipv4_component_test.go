@@ -72,8 +72,8 @@ func TestIPv4EncodeBasic(t *testing.T) {
 	if len(got.OptionsRaw) != 0 {
 		t.Errorf("OptionsRaw: expected empty, got %d bytes", len(got.OptionsRaw))
 	}
-	if got.HeaderLen() != 20 {
-		t.Errorf("HeaderLen: got %d want 20", got.HeaderLen())
+	if got.LayerSize() != 20 {
+		t.Errorf("LayerSize: got %d want 20", got.LayerSize())
 	}
 }
 
@@ -106,8 +106,8 @@ func TestIPv4EncodeWithOptions(t *testing.T) {
 	if got.IPv4IHL != 6 { // 20 + 4 option bytes = 24, IHL = 24/4 = 6
 		t.Errorf("IHL: got %d want 6", got.IPv4IHL)
 	}
-	if got.HeaderLen() != 24 {
-		t.Errorf("HeaderLen: got %d want 24", got.HeaderLen())
+	if got.LayerSize() != 24 {
+		t.Errorf("LayerSize: got %d want 24", got.LayerSize())
 	}
 }
 

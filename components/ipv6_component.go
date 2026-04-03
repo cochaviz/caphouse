@@ -39,7 +39,7 @@ func (c *IPv6Component) Name() string         { return "ipv6" }
 func (c *IPv6Component) Order() uint          { return OrderL3Base }
 func (c *IPv6Component) Index() uint16        { return c.LayerIndex }
 func (c *IPv6Component) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *IPv6Component) HeaderLen() int       { return 40 }
+func (c *IPv6Component) LayerSize() int       { return 40 }
 func (c *IPv6Component) FetchOrderBy() string { return "packet_id" }
 
 func (c *IPv6Component) ClickhouseColumns() ([]string, error) {

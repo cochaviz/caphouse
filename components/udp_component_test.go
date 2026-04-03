@@ -45,8 +45,8 @@ func TestUDPEncodeBasic(t *testing.T) {
 	if got.Length != 10 { // 8-byte header + 2 bytes payload
 		t.Errorf("Length: got %d want 10", got.Length)
 	}
-	if got.HeaderLen() != 8 {
-		t.Errorf("HeaderLen: got %d want 8", got.HeaderLen())
+	if got.LayerSize() != 8 {
+		t.Errorf("LayerSize: got %d want 8", got.LayerSize())
 	}
 }
 

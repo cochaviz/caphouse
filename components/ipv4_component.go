@@ -45,7 +45,7 @@ func (c *IPv4Component) Name() string         { return "ipv4" }
 func (c *IPv4Component) Order() uint          { return OrderL3Base }
 func (c *IPv4Component) Index() uint16        { return c.LayerIndex }
 func (c *IPv4Component) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *IPv4Component) HeaderLen() int       { return 20 + len(c.OptionsRaw) }
+func (c *IPv4Component) LayerSize() int       { return 20 + len(c.OptionsRaw) }
 func (c *IPv4Component) FetchOrderBy() string { return "packet_id" }
 
 func (c *IPv4Component) ClickhouseColumns() ([]string, error) {

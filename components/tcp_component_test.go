@@ -67,8 +67,8 @@ func TestTCPEncodeBasic(t *testing.T) {
 	if got.DataOffset != 5 {
 		t.Errorf("DataOffset: got %d want 5", got.DataOffset)
 	}
-	if got.HeaderLen() != 20 {
-		t.Errorf("HeaderLen: got %d want 20", got.HeaderLen())
+	if got.LayerSize() != 20 {
+		t.Errorf("LayerSize: got %d want 20", got.LayerSize())
 	}
 }
 
@@ -171,8 +171,8 @@ func TestTCPEncodeWithOptions(t *testing.T) {
 	if got.DataOffset != 7 {
 		t.Errorf("DataOffset: got %d want 7", got.DataOffset)
 	}
-	if got.HeaderLen() != 28 {
-		t.Errorf("HeaderLen: got %d want 28", got.HeaderLen())
+	if got.LayerSize() != 28 {
+		t.Errorf("LayerSize: got %d want 28", got.LayerSize())
 	}
 }
 

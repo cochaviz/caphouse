@@ -114,8 +114,8 @@ func TestARPMetadata(t *testing.T) {
 	if ComponentTable(c) != "pcap_arp" {
 		t.Errorf("Table: got %q want %q", ComponentTable(c), "pcap_arp")
 	}
-	if c.HeaderLen() != 28 {
-		t.Errorf("HeaderLen: got %d want 28", c.HeaderLen())
+	if c.LayerSize() != 28 {
+		t.Errorf("LayerSize: got %d want 28", c.LayerSize())
 	}
 }
 

@@ -62,13 +62,10 @@ func encodePacket(linkType uint32, p Packet) codecPacket {
 
 	tailOffset := 0
 	for _, component := range componentList {
-		tailOffset += component.HeaderLen()
-		if tailOffset > len(frame) || tailOffset > maxTailOffset {
-			return rawFrameFallback(nucleus, frame)
-		}
+		tailOffset += component.LayerSize()
 	}
 
-	if tailOffset > len(frame) || tailOffset > maxTailOffset {
+	if tailOffset > min(len(frame), maxTailOffset) {
 		return rawFrameFallback(nucleus, frame)
 	}
 	nucleus.TailOffset = uint16(tailOffset)

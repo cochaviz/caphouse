@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   packet_id       UInt32 CODEC(Delta, LZ4),
   codec_version   UInt16,
   layer_index     UInt16 CODEC(Delta, LZ4),
+  raw_len         UInt16 CODEC(Delta, LZ4),
 
   transaction_id  UInt16,
   qr              UInt8,

@@ -30,7 +30,7 @@ func (c *EthernetComponent) Name() string         { return "ethernet" }
 func (c *EthernetComponent) Order() uint          { return OrderL2Base }
 func (c *EthernetComponent) Index() uint16        { return c.LayerIndex }
 func (c *EthernetComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *EthernetComponent) HeaderLen() int       { return 14 }
+func (c *EthernetComponent) LayerSize() int       { return 14 }
 func (c *EthernetComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *EthernetComponent) ClickhouseColumns() ([]string, error) {
