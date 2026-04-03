@@ -46,8 +46,8 @@ func TestEthernetEncodeBasic(t *testing.T) {
 	if got.EtherType != uint16(layers.EthernetTypeIPv4) {
 		t.Errorf("EtherType: got 0x%x want 0x%x", got.EtherType, uint16(layers.EthernetTypeIPv4))
 	}
-	if got.HeaderLen() != 14 {
-		t.Errorf("HeaderLen: got %d want 14", got.HeaderLen())
+	if got.LayerSize() != 14 {
+		t.Errorf("LayerSize: got %d want 14", got.LayerSize())
 	}
 	if got.Kind() != ComponentEthernet {
 		t.Errorf("Kind: got %d want %d", got.Kind(), ComponentEthernet)

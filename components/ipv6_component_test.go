@@ -65,8 +65,8 @@ func TestIPv6EncodeBasic(t *testing.T) {
 	if got.DstIP6.String() != "2001:db8::2" {
 		t.Errorf("DstIP: got %s want 2001:db8::2", got.DstIP6)
 	}
-	if got.HeaderLen() != 40 {
-		t.Errorf("HeaderLen: got %d want 40", got.HeaderLen())
+	if got.LayerSize() != 40 {
+		t.Errorf("LayerSize: got %d want 40", got.LayerSize())
 	}
 }
 

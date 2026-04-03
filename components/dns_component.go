@@ -23,6 +23,7 @@ type DNSComponent struct {
 	PacketID     uint32 `ch:"packet_id"`
 	CodecVersion uint16 `ch:"codec_version"`
 	LayerIndex   uint16 `ch:"layer_index"`
+	RawLen       uint16 `ch:"raw_len"`
 
 	TransactionID uint16 `ch:"transaction_id"`
 	QR            uint8  `ch:"qr"` // 0=query 1=response
@@ -66,7 +67,7 @@ func (c *DNSComponent) Name() string         { return "dns" }
 func (c *DNSComponent) Order() uint          { return OrderL7Base }
 func (c *DNSComponent) Index() uint16        { return c.LayerIndex }
 func (c *DNSComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *DNSComponent) HeaderLen() int       { return len(c.buildDNSWire()) }
+func (c *DNSComponent) LayerSize() int       { return int(c.RawLen) }
 func (c *DNSComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *DNSComponent) ClickhouseColumns() ([]string, error) {
@@ -87,8 +88,13 @@ func (c *DNSComponent) Reconstruct(ctx *DecodeContext) error {
 		return errors.New("dns component missing")
 	}
 	wire := c.buildDNSWire()
+	if len(wire) > int(c.RawLen) {
+		// Original used name compression; rebuild with compression so the wire
+		// is semantically equivalent and within the expected size.
+		wire = c.buildCompressedDNSWire()
+	}
 	ctx.Layers = append(ctx.Layers, gopacket.Payload(wire))
-	ctx.Offset += len(wire)
+	ctx.Offset += c.LayerSize()
 	return nil
 }
 
@@ -137,8 +143,9 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 	auN, auT, auC, auTTL, auR, _ := encodeRRSection(dns.Authorities)
 	adN, adT, adC, adTTL, adR, _ := encodeRRSection(dns.Additionals)
 
-	return []Component{&DNSComponent{
+	comp := &DNSComponent{
 		CodecVersion:  CodecVersionV1,
+		RawLen:        uint16(len(dns.LayerContents())),
 		TransactionID: dns.ID,
 		QR:            qr,
 		Opcode:        uint8(dns.OpCode),
@@ -170,13 +177,15 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 		AdditionalClass: adC,
 		AdditionalTTL:   adTTL,
 		AdditionalRdata: adR,
-	}}, nil
+	}
+	return []Component{comp}, nil
 }
 
 func (c *DNSComponent) Schema(table string) string { return applySchema(dnsSchemaSQL, table) }
 func (c *DNSComponent) Indexes(table string) []string {
 	return []string{
 		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS raw_len UInt16 CODEC(Delta, LZ4)", table),
 		// Drop the old invalid bloom filter on the nested-array column (if it exists).
 		fmt.Sprintf("ALTER TABLE %s DROP INDEX IF EXISTS idx_answers_ip", table),
 		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_questions_name (questions_name) TYPE bloom_filter GRANULARITY 4", table),
@@ -248,6 +257,93 @@ func (c *DNSComponent) buildDNSWire() []byte {
 	for i, name := range c.AdditionalName {
 		buf = appendDNSRR(buf, name, c.AdditionalType[i], c.AdditionalClass[i], c.AdditionalTTL[i], c.AdditionalRdata[i])
 	}
+	return buf
+}
+
+// buildCompressedDNSWire encodes the DNS message using name compression (RFC 1035 §4.1.4).
+// A map tracks the byte offset of every name suffix written so far; when a suffix is seen
+// again a 2-byte pointer (0xC000 | offset) is emitted instead of repeating the labels.
+func (c *DNSComponent) buildCompressedDNSWire() []byte {
+	buf := make([]byte, 0, int(c.RawLen))
+	offsets := make(map[string]uint16) // suffix → byte offset in buf
+
+	// header (identical to buildDNSWire)
+	var dnsFlags uint16
+	if c.QR == 1 {
+		dnsFlags |= 0x8000
+	}
+	dnsFlags |= uint16(c.Opcode&0x0f) << 11
+	if c.Flags&0x08 != 0 {
+		dnsFlags |= 0x0400
+	}
+	if c.Flags&0x04 != 0 {
+		dnsFlags |= 0x0200
+	}
+	if c.Flags&0x02 != 0 {
+		dnsFlags |= 0x0100
+	}
+	if c.Flags&0x01 != 0 {
+		dnsFlags |= 0x0080
+	}
+	dnsFlags |= uint16(c.RCode & 0x0f)
+
+	buf = binary.BigEndian.AppendUint16(buf, c.TransactionID)
+	buf = binary.BigEndian.AppendUint16(buf, dnsFlags)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(c.QuestionsName)))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(c.AnswersName)))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(c.AuthorityName)))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(c.AdditionalName)))
+
+	for i, name := range c.QuestionsName {
+		buf = appendCompressedName(buf, name, offsets)
+		buf = binary.BigEndian.AppendUint16(buf, c.QuestionsType[i])
+		buf = binary.BigEndian.AppendUint16(buf, c.QuestionsClass[i])
+	}
+	for i, name := range c.AnswersName {
+		buf = appendCompressedRR(buf, name, c.AnswersType[i], c.AnswersClass[i], c.AnswersTTL[i], c.AnswersRdata[i], offsets)
+	}
+	for i, name := range c.AuthorityName {
+		buf = appendCompressedRR(buf, name, c.AuthorityType[i], c.AuthorityClass[i], c.AuthorityTTL[i], c.AuthorityRdata[i], offsets)
+	}
+	for i, name := range c.AdditionalName {
+		buf = appendCompressedRR(buf, name, c.AdditionalType[i], c.AdditionalClass[i], c.AdditionalTTL[i], c.AdditionalRdata[i], offsets)
+	}
+	return buf
+}
+
+// appendCompressedName writes a DNS name into buf using compression pointers where possible.
+// offsets maps each name suffix (dot-separated, no trailing dot) to its byte offset in buf.
+func appendCompressedName(buf []byte, name string, offsets map[string]uint16) []byte {
+	if name == "" || name == "." {
+		return append(buf, 0x00)
+	}
+	name = strings.TrimSuffix(name, ".")
+	labels := strings.Split(name, ".")
+	for i, label := range labels {
+		suffix := strings.Join(labels[i:], ".")
+		if off, ok := offsets[suffix]; ok {
+			// Emit compression pointer and stop.
+			return append(buf, byte(0xC0|(off>>8)), byte(off))
+		}
+		// Record this suffix at its current position (only offsets ≤ 0x3FFF are valid pointers).
+		if len(buf) <= 0x3FFF {
+			offsets[suffix] = uint16(len(buf))
+		}
+		buf = append(buf, byte(len(label)))
+		buf = append(buf, label...)
+	}
+	return append(buf, 0x00) // root label
+}
+
+// appendCompressedRR appends one resource record using name compression.
+func appendCompressedRR(buf []byte, name string, typ, class uint16, ttl uint32, rdata string, offsets map[string]uint16) []byte {
+	buf = appendCompressedName(buf, name, offsets)
+	buf = binary.BigEndian.AppendUint16(buf, typ)
+	buf = binary.BigEndian.AppendUint16(buf, class)
+	buf = binary.BigEndian.AppendUint32(buf, ttl)
+	rd := []byte(rdata)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(rd)))
+	buf = append(buf, rd...)
 	return buf
 }
 

@@ -54,7 +54,7 @@ func (c *TCPComponent) Name() string         { return "tcp" }
 func (c *TCPComponent) Order() uint          { return OrderL4Base }
 func (c *TCPComponent) Index() uint16        { return c.LayerIndex }
 func (c *TCPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *TCPComponent) HeaderLen() int       { return int(c.DataOffset) * 4 }
+func (c *TCPComponent) LayerSize() int       { return int(c.DataOffset) * 4 }
 func (c *TCPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *TCPComponent) ClickhouseColumns() ([]string, error) {

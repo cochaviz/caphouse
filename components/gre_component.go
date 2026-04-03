@@ -41,7 +41,7 @@ func (c *GREComponent) Index() uint16        { return c.LayerIndex }
 func (c *GREComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *GREComponent) FetchOrderBy() string { return "packet_id" }
 
-func (c *GREComponent) HeaderLen() int {
+func (c *GREComponent) LayerSize() int {
 	n := 4
 	if c.Flags&0x01 != 0 {
 		n += 4 // checksum + reserved
@@ -72,7 +72,7 @@ func (c *GREComponent) Reconstruct(ctx *DecodeContext) error {
 	if c == nil {
 		return errors.New("gre component missing")
 	}
-	n := c.HeaderLen()
+	n := c.LayerSize()
 	hdr := make([]byte, n)
 	var word0 uint16
 	if c.Flags&0x01 != 0 {

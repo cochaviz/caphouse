@@ -32,7 +32,7 @@ func (c *ICMPv6Component) Name() string         { return "icmpv6" }
 func (c *ICMPv6Component) Order() uint          { return OrderL4Base }
 func (c *ICMPv6Component) Index() uint16        { return c.LayerIndex }
 func (c *ICMPv6Component) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *ICMPv6Component) HeaderLen() int       { return 4 }
+func (c *ICMPv6Component) LayerSize() int       { return 4 }
 func (c *ICMPv6Component) FetchOrderBy() string { return "packet_id" }
 
 func (c *ICMPv6Component) ClickhouseColumns() ([]string, error) {

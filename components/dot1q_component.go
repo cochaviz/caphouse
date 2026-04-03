@@ -36,7 +36,7 @@ func (c *Dot1QComponent) Name() string          { return "dot1q" }
 func (c *Dot1QComponent) Order() uint           { return OrderL2Tag }
 func (c *Dot1QComponent) Index() uint16         { return c.LayerIndex }
 func (c *Dot1QComponent) SetIndex(index uint16) { c.LayerIndex = index }
-func (c *Dot1QComponent) HeaderLen() int        { return 4 }
+func (c *Dot1QComponent) LayerSize() int        { return 4 }
 func (c *Dot1QComponent) FetchOrderBy() string  { return "packet_id, layer_index" }
 
 func (c *Dot1QComponent) ClickhouseColumns() ([]string, error) {

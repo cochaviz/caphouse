@@ -964,10 +964,10 @@ func findMultipleComponents[K components.Component](comps []components.Component
 	return out
 }
 
-func sumHeaderLen(comps []components.Component) int {
+func sumLayerSize(comps []components.Component) int {
 	total := 0
 	for _, comp := range comps {
-		total += comp.HeaderLen()
+		total += comp.LayerSize()
 	}
 	return total
 }
@@ -1029,7 +1029,7 @@ func TestCodecDot1QStackingRawTail(t *testing.T) {
 	if !hasComponentKind(encoded.Components, components.ComponentUDP) {
 		t.Fatalf("expected udp component")
 	}
-	expectedOffset := sumHeaderLen(encoded.Components)
+	expectedOffset := sumLayerSize(encoded.Components)
 	if encoded.Nucleus.TailOffset != uint16(expectedOffset) {
 		t.Fatalf("tail_offset mismatch: got %d want %d", encoded.Nucleus.TailOffset, expectedOffset)
 	}

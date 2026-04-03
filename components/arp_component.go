@@ -34,7 +34,7 @@ func (c *ARPComponent) Name() string         { return "arp" }
 func (c *ARPComponent) Order() uint          { return OrderL4Base }
 func (c *ARPComponent) Index() uint16        { return c.LayerIndex }
 func (c *ARPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *ARPComponent) HeaderLen() int       { return 28 }
+func (c *ARPComponent) LayerSize() int       { return 28 }
 func (c *ARPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *ARPComponent) ClickhouseColumns() ([]string, error) {

@@ -33,7 +33,7 @@ func (c *IPv6ExtComponent) Index() uint16        { return c.LayerIndex }
 func (c *IPv6ExtComponent) SetIndex(i uint16)    { c.LayerIndex = i }
 func (c *IPv6ExtComponent) FetchOrderBy() string { return "packet_id, layer_index" }
 
-func (c *IPv6ExtComponent) HeaderLen() int {
+func (c *IPv6ExtComponent) LayerSize() int {
 	if len(c.ExtRaw) < 2 {
 		return len(c.ExtRaw)
 	}
@@ -60,11 +60,11 @@ func (c *IPv6ExtComponent) Reconstruct(ctx *DecodeContext) error {
 	if len(c.ExtRaw) < 2 {
 		return errors.New("ipv6 ext too short")
 	}
-	if len(c.ExtRaw) != c.HeaderLen() {
+	if len(c.ExtRaw) != c.LayerSize() {
 		return errors.New("ipv6 ext length mismatch")
 	}
 	ctx.Layers = append(ctx.Layers, gopacket.Payload(c.ExtRaw))
-	ctx.Offset += c.HeaderLen()
+	ctx.Offset += c.LayerSize()
 	return nil
 }
 

@@ -43,7 +43,7 @@ func (c *NTPComponent) Name() string         { return "ntp" }
 func (c *NTPComponent) Order() uint          { return OrderL7Base }
 func (c *NTPComponent) Index() uint16        { return c.LayerIndex }
 func (c *NTPComponent) SetIndex(i uint16)    { c.LayerIndex = i }
-func (c *NTPComponent) HeaderLen() int       { return len(c.NTPRaw) }
+func (c *NTPComponent) LayerSize() int       { return len(c.NTPRaw) }
 func (c *NTPComponent) FetchOrderBy() string { return "packet_id" }
 
 func (c *NTPComponent) ClickhouseColumns() ([]string, error) {

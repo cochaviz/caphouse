@@ -63,7 +63,7 @@ type LayerDecoder interface {
 	Order() uint
 	Index() uint16
 	SetIndex(uint16)
-	HeaderLen() int
+	LayerSize() int
 	ApplyNucleus(PacketNucleus)
 	Reconstruct(*DecodeContext) error
 }

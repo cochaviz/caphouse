@@ -54,8 +54,8 @@ func TestDot1QEncodeBasic(t *testing.T) {
 	if got.EtherType != uint16(layers.EthernetTypeIPv4) {
 		t.Errorf("EtherType: got 0x%x", got.EtherType)
 	}
-	if got.HeaderLen() != 4 {
-		t.Errorf("HeaderLen: got %d want 4", got.HeaderLen())
+	if got.LayerSize() != 4 {
+		t.Errorf("LayerSize: got %d want 4", got.LayerSize())
 	}
 }
 

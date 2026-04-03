@@ -87,7 +87,7 @@ func (c testComponent) ClickhouseValues() ([]any, error) {
 	return GetClickhouseValuesFrom(c)
 }
 func (testComponent) SetIndex(uint16)                  {}
-func (testComponent) HeaderLen() int                   { return 0 }
+func (testComponent) LayerSize() int                   { return 0 }
 func (testComponent) ApplyNucleus(PacketNucleus)       {}
 func (testComponent) Reconstruct(*DecodeContext) error { return nil }
 
@@ -106,7 +106,7 @@ func (c otherComponent) ClickhouseValues() ([]any, error) {
 	return GetClickhouseValuesFrom(c)
 }
 func (otherComponent) SetIndex(uint16)                  {}
-func (otherComponent) HeaderLen() int                   { return 0 }
+func (otherComponent) LayerSize() int                   { return 0 }
 func (otherComponent) ApplyNucleus(PacketNucleus)       {}
 func (otherComponent) Reconstruct(*DecodeContext) error { return nil }
 
