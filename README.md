@@ -38,6 +38,9 @@ Read more about how it works, and get started by following the documentation:
 - **At-least-once delivery** — batch retries with exponential backoff and
   `ReplacingMergeTree`-based deduplication mean re-ingesting a file is always
   safe.
+- **Oldest-first retention cap** — optionally bound caphouse-managed
+  ClickHouse storage with `--max-storage`, pruning whole oldest captures after
+  successful ingest.
 - **Continuous capture** — `caphouse-monitor` wraps tcpdump ring-buffer
   rotation with automatic ingest, keeping disk usage bounded.
 - **Ingest classic PCAP and PCAPng** — both formats are accepted; PCAPng is
@@ -76,6 +79,9 @@ caphouse -d "clickhouse://default:default@localhost:9000/default" capture.pcap
 
 # Ingest multiple files or a glob
 caphouse -d "..." ring*.pcap
+
+# Keep caphouse-managed ClickHouse storage under 100 GiB
+caphouse -d "..." --max-storage 100GiB capture.pcap
 
 # Export
 caphouse -w -d "..." -c "<capture_id>" out.pcap

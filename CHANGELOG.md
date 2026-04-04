@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### New Features
+
+- **Storage cap retention (`--max-storage`)** — optionally bound
+  caphouse-managed ClickHouse storage to a target size. After each successful
+  ingest, caphouse measures compressed bytes across its own `pcap_*` and
+  `stream_*` tables and prunes whole oldest captures until usage drops under
+  the configured cap, keeping the newest just-ingested capture.
+
+### Fixes
+
+- **`--max-storage` size parsing** — distinguish `B` (bytes) from `b`
+  (bits), so values like `500MB` and `500Mb` no longer resolve to the same
+  threshold.
+- **DNS byte-exact export** — preserve the DNS `Z` header bits during ingest
+  and reconstruction so captures with non-zero reserved/AD/CD-style DNS flags
+  round-trip byte-for-byte.
+
 ## [v0.3.1] - 2026-03-18
 
 ### New Features

@@ -10,6 +10,7 @@
 | `--query` | `-q` | — | — | Filter expression. Without `--write`: prints SQL. With `--write`: exports matching packets as PCAP. |
 | `--components` | `-C` | — | — | Comma-separated protocol tables to LEFT JOIN in SQL output (e.g. `ipv4,tcp`). Requires `-q` without `-w`. |
 | `--no-streams` | | — | false | Disable TCP stream tracking and L7 protocol detection during ingest. Speeds up ingest when stream reassembly is not needed. |
+| `--max-storage` | | `CAPHOUSE_MAX_STORAGE` | disabled | Maximum compressed size for caphouse-managed ClickHouse tables after ingest. Accepts plain bytes or human-readable sizes such as `100GiB`, `500MB`, `800Gib`, or `1TiB`. Use `B` for bytes and `b` for bits. When exceeded, whole oldest captures are pruned. |
 | `--batch-size` | | — | 1000 | Packets per ClickHouse batch insert. |
 | `--flush-interval` | | — | 1s | Maximum time between batch flushes. |
 | `--silent` | `-s` | — | false | Suppress warnings and progress output. |

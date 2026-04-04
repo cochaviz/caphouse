@@ -10,4 +10,5 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   payload     String          CODEC(ZSTD(3))
 )
 ENGINE = ReplacingMergeTree
+PARTITION BY toDate(intDiv(ts, 1000000000))
 ORDER BY (ts, session_id, packet_id)

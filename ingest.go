@@ -305,6 +305,9 @@ func (c *Client) ingestPackets(
 	reader packetStreamReader,
 	onPacket func(),
 ) (uint64, error) {
+	if err := c.enforceStorageCap(ctx); err != nil {
+		return 0, err
+	}
 	sessionID, err := c.CreateCapture(ctx, meta)
 	if err != nil {
 		return 0, err
@@ -342,5 +345,8 @@ func (c *Client) ingestPackets(
 	if err := c.Flush(ctx); err != nil {
 		return 0, err
 	}
-	return sessionID, c.FinalizeStreams(ctx)
+	if err := c.FinalizeStreams(ctx); err != nil {
+		return 0, err
+	}
+	return sessionID, nil
 }

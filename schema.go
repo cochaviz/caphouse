@@ -61,6 +61,9 @@ func (c *Client) InitSchema(ctx context.Context) error {
 	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, packetsTable)); err != nil {
 		return fmt.Errorf("create packets table: %w", err)
 	}
+	if err := c.migratePacketsPartitionKey(ctx); err != nil {
+		return fmt.Errorf("migrate packets partition key: %w", err)
+	}
 
 	for _, ctor := range components.ComponentFactories {
 		proto := ctor()
@@ -92,6 +95,51 @@ func (c *Client) InitSchema(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+// migratePacketsPartitionKey ensures pcap_packets has the expected
+// PARTITION BY clause. Existing tables created before this feature was added
+// have no partition key; we migrate them by renaming the old table, creating
+// a new one with the partition key, copying all data, then dropping the old
+// table. This is a one-time, blocking operation that may be slow for large
+// tables.
+func (c *Client) migratePacketsPartitionKey(ctx context.Context) error {
+	const wantKey = "toDate(intDiv(ts, 1000000000))"
+
+	var partitionKey string
+	if err := c.conn.QueryRow(ctx,
+		"SELECT partition_key FROM system.tables WHERE database = ? AND name = 'pcap_packets'",
+		c.cfg.Database,
+	).Scan(&partitionKey); err != nil {
+		// Table doesn't exist yet — CREATE TABLE above just made it with the
+		// correct partition key, nothing to migrate.
+		return nil
+	}
+	if partitionKey == wantKey {
+		return nil
+	}
+
+	c.log.Warn("migrating pcap_packets to add partition key; this may be slow for large tables")
+
+	old := c.packetsTable()
+	tmp := c.tableRef("pcap_packets_migration_tmp")
+
+	if err := c.conn.Exec(ctx, fmt.Sprintf("RENAME TABLE %s TO %s", old, tmp)); err != nil {
+		return fmt.Errorf("rename packets table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, old)); err != nil {
+		_ = c.conn.Exec(ctx, fmt.Sprintf("RENAME TABLE %s TO %s", tmp, old))
+		return fmt.Errorf("create partitioned packets table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT * FROM %s", old, tmp)); err != nil {
+		return fmt.Errorf("copy packets data to partitioned table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, fmt.Sprintf("DROP TABLE %s", tmp)); err != nil {
+		return fmt.Errorf("drop old packets table: %w", err)
+	}
+
+	c.log.Info("pcap_packets migration complete")
 	return nil
 }
 
