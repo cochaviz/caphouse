@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -166,6 +168,7 @@ func newClient(ctx context.Context, cfg config, logger *slog.Logger) (*caphouse.
 		DSN:                   cfg.dsn,
 		BatchSize:             cfg.batchSize,
 		FlushInterval:         cfg.flushInterval,
+		MaxStorageBytes:       cfg.maxStorageBytes,
 		Debug:                 cfg.debug,
 		Logger:                logger,
 		DisableStreamTracking: cfg.noStreams,
@@ -210,6 +213,108 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+var byteSizeRe = regexp.MustCompile(`^\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]*)\s*$`)
+
+func parseByteSize(raw string) (uint64, error) {
+	m := byteSizeRe.FindStringSubmatch(raw)
+	if m == nil {
+		return 0, fmt.Errorf("invalid size %q", raw)
+	}
+
+	value, ok := new(big.Rat).SetString(m[1])
+	if !ok {
+		return 0, fmt.Errorf("parse number: invalid decimal %q", m[1])
+	}
+	if value.Sign() < 0 {
+		return 0, fmt.Errorf("size must be non-negative")
+	}
+
+	multiplier, divisor, ok := parseByteSizeUnit(m[2])
+	if !ok {
+		return 0, fmt.Errorf("unsupported unit %q", m[2])
+	}
+
+	total := new(big.Rat).Mul(value, new(big.Rat).SetInt(new(big.Int).SetUint64(multiplier)))
+	if divisor != 1 {
+		total.Quo(total, new(big.Rat).SetInt(new(big.Int).SetUint64(divisor)))
+	}
+	if !total.IsInt() {
+		return 0, fmt.Errorf("size %q does not resolve to a whole number of bytes", raw)
+	}
+	if !total.Num().IsUint64() {
+		return 0, fmt.Errorf("size %q exceeds uint64", raw)
+	}
+	return total.Num().Uint64(), nil
+}
+
+func parseByteSizeUnit(unit string) (multiplier uint64, divisor uint64, ok bool) {
+	if unit == "" {
+		return 1, 1, true
+	}
+
+	explicitBytes := false
+	switch suffix := unit[len(unit)-1]; suffix {
+	case 'B':
+		explicitBytes = true
+		unit = unit[:len(unit)-1]
+	case 'b':
+		explicitBytes = true
+		divisor = 8
+		unit = unit[:len(unit)-1]
+	default:
+		divisor = 1
+	}
+	if divisor == 0 {
+		divisor = 1
+	}
+
+	binary := false
+	if len(unit) > 0 {
+		last := unit[len(unit)-1]
+		if last == 'i' || last == 'I' {
+			binary = true
+			unit = unit[:len(unit)-1]
+		}
+	}
+
+	prefix := strings.ToUpper(unit)
+	var exp uint
+	switch prefix {
+	case "":
+		exp = 0
+	case "K":
+		exp = 1
+	case "M":
+		exp = 2
+	case "G":
+		exp = 3
+	case "T":
+		exp = 4
+	case "P":
+		exp = 5
+	default:
+		return 0, 0, false
+	}
+
+	if !explicitBytes && exp > 0 && !binary {
+		// Preserve the existing shorthand where bare K/M/G/T/P mean binary bytes.
+		binary = true
+	}
+
+	if binary {
+		return 1 << (10 * exp), divisor, true
+	}
+	return pow1000(exp), divisor, true
+}
+
+func pow1000(exp uint) uint64 {
+	value := uint64(1)
+	for range exp {
+		value *= 1000
+	}
+	return value
 }
 
 // parseSessionID parses a decimal uint64 session ID string.

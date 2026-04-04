@@ -13,6 +13,9 @@ tcpdump -i eth0 -w - | caphouse -d "..."
 # Ingest multiple files or a glob in one command
 caphouse -d "..." --sensor myhost ring*.pcap
 
+# Keep caphouse-managed ClickHouse storage under 100 GiB
+caphouse -d "..." --sensor myhost --max-storage 100GiB capture.pcap
+
 # Append to an existing capture
 caphouse -d "..." more.pcap -c <uuid>
 
@@ -21,6 +24,11 @@ caphouse -d "..." --no-streams capture.pcap
 ```
 
 The schema is created automatically on the first ingest.
+
+When `--max-storage` is set, caphouse measures compressed bytes across its own
+`pcap_*` and `stream_*` tables after each successful ingest and prunes whole
+oldest captures until usage drops under the configured cap or only the newest
+just-ingested capture remains.
 
 PCAPng files (`.pcapng`) are also accepted. They are converted to classic PCAP
 on ingest — non-packet blocks are discarded and the exported result is always a

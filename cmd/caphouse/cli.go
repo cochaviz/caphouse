@@ -55,6 +55,9 @@ Examples:
   # Ingest without L7 stream tracking
   caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --no-streams capture.pcap
 
+  # Keep caphouse-managed ClickHouse storage under 100 GiB
+  caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --max-storage=100GiB capture.pcap
+
   # Append packets to an existing capture
   caphouse --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost more.pcap --capture=<uuid>
 
@@ -84,19 +87,20 @@ var banner string
 
 // config holds all resolved flag/env values for a single invocation.
 type config struct {
-	dsn           string
-	batchSize     int
-	flushInterval time.Duration
-	filePaths     []string // one or more input/output paths; globs expanded at runtime
-	capture       string
-	sensor        string
-	queryExpr     string
-	components    []string
-	fromTime      time.Time
-	toTime        time.Time
-	debug         bool
-	silent        bool
-	noStreams     bool
+	dsn             string
+	batchSize       int
+	flushInterval   time.Duration
+	maxStorageBytes uint64
+	filePaths       []string // one or more input/output paths; globs expanded at runtime
+	capture         string
+	sensor          string
+	queryExpr       string
+	components      []string
+	fromTime        time.Time
+	toTime          time.Time
+	debug           bool
+	silent          bool
+	noStreams       bool
 }
 
 func main() {
@@ -109,6 +113,7 @@ func rootCmd() *cobra.Command {
 	var dsn string
 	var batchSize int
 	var flushInterval time.Duration
+	var maxStorage string
 	var readMode bool
 	var writeMode bool
 	var capture string
@@ -175,6 +180,14 @@ func rootCmd() *cobra.Command {
 			if cfg.dsn == "" {
 				return errors.New("dsn is required (flag --dsn or env CAPHOUSE_DSN)")
 			}
+			maxStorageValue := firstNonEmpty(maxStorage, os.Getenv("CAPHOUSE_MAX_STORAGE"))
+			if maxStorageValue != "" {
+				sizeBytes, err := parseByteSize(maxStorageValue)
+				if err != nil {
+					return fmt.Errorf("--max-storage: %w", err)
+				}
+				cfg.maxStorageBytes = sizeBytes
+			}
 			if queryExpr != "" && !writeMode {
 				return runExplain(cmd, cfg)
 			}
@@ -188,6 +201,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&dsn, "dsn", "d", "", "ClickHouse DSN, e.g. clickhouse://user:pass@host:9000/db (or CAPHOUSE_DSN)")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "packets per ClickHouse batch insert")
 	cmd.Flags().DurationVar(&flushInterval, "flush-interval", 0, "maximum time between batch flushes")
+	cmd.Flags().StringVar(&maxStorage, "max-storage", "", "maximum compressed bytes for caphouse-managed ClickHouse tables after ingest, e.g. 100GiB or 800Gib; use B for bytes and b for bits (or CAPHOUSE_MAX_STORAGE)")
 	cmd.Flags().BoolVar(&debug, "debug", false, "enable verbose ClickHouse driver logging to stderr")
 	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "suppress warnings and progress output")
 	cmd.Flags().BoolVar(&noStreams, "no-streams", false, "disable TCP stream tracking and L7 protocol detection during ingest")

@@ -9,13 +9,14 @@ import (
 
 // Config controls the ClickHouse connection and ingest behavior.
 type Config struct {
-	DSN           string // clickhouse connection string or host:port
-	Database      string
-	Sensor        string
-	BatchSize     int // packets per batch (ingest) and export window
-	FlushInterval time.Duration
-	Debug         bool
-	Logger        *slog.Logger // nil uses slog.Default()
+	DSN             string // clickhouse connection string or host:port
+	Database        string
+	Sensor          string
+	BatchSize       int // packets per batch (ingest) and export window
+	FlushInterval   time.Duration
+	MaxStorageBytes uint64 // 0 disables oldest-first storage pruning after ingest
+	Debug           bool
+	Logger          *slog.Logger // nil uses slog.Default()
 
 	// DisableStreamTracking skips TCP stream reassembly and L7 protocol
 	// detection during ingest. Stream tracking is enabled by default.
