@@ -5,6 +5,31 @@ ClickHouse. Both are really easy to install and get started with, but we have
 also included a `.devcontainer` that, as long as you have Docker installed,
 sets you up with everything you need to get started quickly.
 
+The development container stack is defined in
+[`../.devcontainer/docker-compose.yml`](../.devcontainer/docker-compose.yml).
+Unlike the repository-level [`../docker-compose.yml`](../docker-compose.yml),
+it includes a bundled `clickhouse` service for local development. The root
+compose file is closer to a production starting point: it builds `caphouse-api`
+and `caphouse-ui`, but expects you to provide ClickHouse separately via
+`CAPHOUSE_DSN`.
+
+Inside the devcontainer, the `app` service already has
+`CAPHOUSE_DSN=clickhouse://default:@clickhouse:9000/default` configured. A
+typical workflow is:
+
+```sh
+# From the repo root, if you want to run the dev stack directly
+docker compose -f .devcontainer/docker-compose.yml up --build -d
+docker compose -f .devcontainer/docker-compose.yml exec app go run ./cmd/caphouse-api
+
+# In the devcontainer app shell
+go run ./cmd/caphouse-api
+```
+
+The companion `caphouse-ui` service from the same dev compose file runs Vite in
+watch mode and proxies `/v1` requests to the API over the internal Docker
+network.
+
 ## Creating new Components
 
 One of the easiest ways to contribute to `caphouse` is by creating new
@@ -32,11 +57,13 @@ All exported symbols carry godoc comments. Key entry points:
 
 ## Running Tests
 
-The test suite is split into three tiers, each with its own build tag:
+The test suite is split into tiers, each with its own build tag. Test fixture
+PCAPs live in `testdata/` and are stored in Git LFS — run `git lfs pull` after
+cloning if they are not present.
 
 ### Unit tests
 
-Pure in-memory tests with no external dependencies or file I/O. Run with:
+Pure in-memory tests with no external dependencies or file I/O.
 
 ```sh
 go test ./...
@@ -44,11 +71,11 @@ go test ./...
 
 ### Integration tests
 
-Use fixture files from `testdata/` together with the in-memory mock client. No
+Use fixture files from `testdata/` with the in-memory mock client. No
 ClickHouse instance is required.
 
 ```sh
-go test -tags=integration ./...
+go test -tags integration ./...
 ```
 
 ### E2E tests
@@ -57,14 +84,64 @@ Spin up a real ClickHouse container via
 [testcontainers](https://testcontainers.com/). Docker must be running.
 
 ```sh
-go test -tags=e2e ./...
+go test -tags e2e -timeout 600s ./...
+```
+
+### Throughput benchmarks
+
+Measure ingest and export throughput against a live ClickHouse container.
+
+```sh
+# Run the Go benchmarks directly
+go test -tags throughput -bench=. -benchtime=3x ./...
+
+# Run as a regression test (fails if >5% slower than the baseline in main)
+go test -tags "throughput regression" -v -timeout 600s ./...
+```
+
+After a `throughput,regression` run, `benchmark_results/throughput_baseline.json`
+is updated in the working tree. Commit it alongside your changes to record the
+new expected performance.
+
+### Compression tests
+
+Measure ClickHouse storage efficiency and parse ratios for each PCAP in
+`testdata/`. Results are written to `benchmark_results/` as JSON (regression
+baseline) and CSV (ratio tables).
+
+```sh
+# Run the regression test (fails if compression worsens vs baseline in main)
+go test -tags "compression regression" -v -timeout 300s .
 ```
 
 To run all tiers at once:
 
 ```sh
-go test -tags=integration,e2e ./...
+go test -tags "integration e2e" ./...
 ```
+
+## Schema Migrations
+
+`InitSchema` (called automatically on the first ingest) applies SQL migration
+files embedded in the binary from `migrations/`. Applied migrations are
+recorded in a `caphouse_schema_migrations` table so each file runs exactly
+once. Migrations are sorted and applied in lexicographic order — prefix file
+names with a timestamp (`YYYYMMDDHHMMSS`) to control ordering.
+
+If the database version is _ahead_ of the binary's compiled-in migrations
+(e.g. after a downgrade), `InitSchema` returns an error before touching any
+data.
+
+To add a migration, create a new `.sql` file in `migrations/`:
+
+```
+migrations/20260401120000_add_my_column.sql
+```
+
+The migration system is tested by `go test -tags e2e` (`TestMigrationsIdempotent`,
+`TestMigrationsVersionTracking`, `TestMigrationsStaleClientError`) and by
+`migrations/test_migration_compat.sh`, which builds both the pre-migration
+binary and the current binary against a live ClickHouse and diffs their exports.
 
 ## Working with Compression
 
