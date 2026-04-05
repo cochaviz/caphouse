@@ -30,9 +30,9 @@ set -euo pipefail
 # Constants
 # ---------------------------------------------------------------------------
 
-# The last git commit before the migration system was introduced.
-# Update this when a new minimum supported version is established.
-readonly OLDEST_COMMIT="2267799025d70ecca28214191f133b5f468ddde9"
+# Git checkout for the old binary. Currently for the earliest commit
+# that supported migrations.
+readonly OLDEST_COMMIT="ab3bafccf999fc5b79238dd74e762b5ad8731f70"
 
 readonly DB_PREFIX="caphouse_compat"
 readonly FROM_TIME="1970-01-01T00:00:00Z"

@@ -1,20 +1,17 @@
 # testing
-testresults/
-testdata*/
+test_results/
 *.pcap
+*.pcapng
 
 # build artifacts
 build/
 man/
 completions/
-
-# agents
-.claude/
-.codex
+tmp/
 
 # dev
 .zed/
-tmp/
 .vscode/
-
+.claude/
+.codex
 .env
