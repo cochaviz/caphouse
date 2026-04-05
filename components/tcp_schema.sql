@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   window      UInt16,
   checksum    UInt16,
   urgent      UInt16,
-  options_raw String CODEC(ZSTD(3))
+  options_raw String CODEC(ZSTD(3)),
+  INDEX idx_dst (dst) TYPE bloom_filter GRANULARITY 4,
+  INDEX idx_flags (flags) TYPE set(512) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

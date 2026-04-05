@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -140,10 +139,3 @@ func (c *GREComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *GREComponent) Schema(table string) string { return applySchema(greSchemaSQL, table) }
-func (c *GREComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_protocol (protocol) TYPE set(256) GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_key (key) TYPE bloom_filter GRANULARITY 4", table),
-	}
-}

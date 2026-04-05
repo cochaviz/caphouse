@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   version  UInt8,
   checksum UInt16,
   key      UInt32 CODEC(LZ4),
-  seq      UInt32 CODEC(Delta, LZ4)
+  seq      UInt32 CODEC(Delta, LZ4),
+  INDEX idx_protocol (protocol) TYPE set(256) GRANULARITY 4,
+  INDEX idx_key (key) TYPE bloom_filter GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

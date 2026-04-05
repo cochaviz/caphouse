@@ -149,13 +149,6 @@ func (c *IPv4Component) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *IPv4Component) Schema(table string) string { return applySchema(ipv4SchemaSQL, table) }
-func (c *IPv4Component) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_proto (protocol) TYPE set(256) GRANULARITY 4", table),
-	}
-}
 
 func parseIPv4Options(raw []byte) ([]layers.IPv4Option, error) {
 	opts := make([]layers.IPv4Option, 0)

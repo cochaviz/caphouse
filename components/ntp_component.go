@@ -3,7 +3,6 @@ package components
 import (
 	_ "embed"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -102,8 +101,3 @@ func (c *NTPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *NTPComponent) Schema(table string) string { return applySchema(ntpSchemaSQL, table) }
-func (c *NTPComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-	}
-}

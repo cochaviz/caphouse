@@ -21,25 +21,23 @@ func applySchema(sql, table string) string {
 	return strings.ReplaceAll(sql, "{{ table }}", table)
 }
 
+
 // InitSchema creates the database and all caphouse tables if they do not
-// exist. It is safe to call on every startup — all statements use
-// CREATE TABLE IF NOT EXISTS / ADD INDEX IF NOT EXISTS.
+// exist, then runs any pending schema migrations. It is safe to call on
+// every startup — CREATE TABLE statements use IF NOT EXISTS, and migrations
+// are skipped once recorded in caphouse_schema_migrations.
 //
 // Tables created:
 //
 //   - pcap_captures — one row per ingested capture session.
-//   - pcap_packets — one row per packet; ts is a nanosecond offset from the
-//     capture's created_at so that absolute time = created_at + ts.
-//   - pcap_<protocol> — one table per registered [components.Component]
-//     (e.g. pcap_ethernet, pcap_ipv4, pcap_tcp). New components are picked
-//     up automatically via [components.ComponentFactories].
+//   - pcap_packets — one row per packet.
+//   - pcap_<protocol> — one table per registered [components.Component].
 //   - stream_captures — one row per observed TCP stream.
 //   - stream_http — reconstructed HTTP sessions from TCP stream reassembly.
 //
-// All tables use ReplacingMergeTree, making re-ingest of the same capture
-// idempotent: duplicate rows are deduplicated at merge time (or on read with
-// FINAL). The primary key / ORDER BY on each table is chosen to maximise
-// compression for that layer's column access patterns.
+// Schema files define the current complete table structure for fresh installs.
+// Migration files in migrations/ apply deltas (new indexes, column changes,
+// etc.) to existing databases. Both are idempotent and safe to re-run.
 func (c *Client) InitSchema(ctx context.Context) error {
 	if c.cfg.Database == "" {
 		return errors.New("database is required")
@@ -50,19 +48,17 @@ func (c *Client) InitSchema(ctx context.Context) error {
 		return fmt.Errorf("create database: %w", err)
 	}
 
-	capturesTable := c.capturesTable()
-	packetsTable := c.packetsTable()
-	streamCapturesTable := c.streamCapturesTable()
-	streamHTTPTable := c.streamHTTPTable()
-
-	if err := c.conn.Exec(ctx, applySchema(capturesSchemaSQL, capturesTable)); err != nil {
+	if err := c.conn.Exec(ctx, applySchema(capturesSchemaSQL, c.capturesTable())); err != nil {
 		return fmt.Errorf("create captures table: %w", err)
 	}
-	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, packetsTable)); err != nil {
+	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, c.packetsTable())); err != nil {
 		return fmt.Errorf("create packets table: %w", err)
 	}
-	if err := c.migratePacketsPartitionKey(ctx); err != nil {
-		return fmt.Errorf("migrate packets partition key: %w", err)
+	if err := c.conn.Exec(ctx, streams.CapturesSchema(c.streamCapturesTable())); err != nil {
+		return fmt.Errorf("create stream_captures table: %w", err)
+	}
+	if err := c.conn.Exec(ctx, streams.HTTPSchema(c.streamHTTPTable())); err != nil {
+		return fmt.Errorf("create stream_http table: %w", err)
 	}
 
 	for _, ctor := range components.ComponentFactories {
@@ -73,73 +69,10 @@ func (c *Client) InitSchema(ctx context.Context) error {
 		}
 	}
 
-	if err := c.conn.Exec(ctx, streams.CapturesSchema(streamCapturesTable)); err != nil {
-		return fmt.Errorf("create stream_captures table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, streams.HTTPSchema(streamHTTPTable)); err != nil {
-		return fmt.Errorf("create stream_http table: %w", err)
+	if err := c.runMigrations(ctx); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
 	}
 
-	indexes := []string{
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_session (session_id) TYPE set(10000) GRANULARITY 1", packetsTable),
-	}
-	for _, ctor := range components.ComponentFactories {
-		proto := ctor()
-		indexes = append(indexes, proto.Indexes(c.tableRef(components.ComponentTable(proto)))...)
-	}
-	indexes = append(indexes, streams.CapturesIndexes(streamCapturesTable)...)
-	indexes = append(indexes, streams.HTTPIndexes(streamHTTPTable)...)
-	for _, stmt := range indexes {
-		if err := c.conn.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("add index: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// migratePacketsPartitionKey ensures pcap_packets has the expected
-// PARTITION BY clause. Existing tables created before this feature was added
-// have no partition key; we migrate them by renaming the old table, creating
-// a new one with the partition key, copying all data, then dropping the old
-// table. This is a one-time, blocking operation that may be slow for large
-// tables.
-func (c *Client) migratePacketsPartitionKey(ctx context.Context) error {
-	const wantKey = "toDate(intDiv(ts, 1000000000))"
-
-	var partitionKey string
-	if err := c.conn.QueryRow(ctx,
-		"SELECT partition_key FROM system.tables WHERE database = ? AND name = 'pcap_packets'",
-		c.cfg.Database,
-	).Scan(&partitionKey); err != nil {
-		// Table doesn't exist yet — CREATE TABLE above just made it with the
-		// correct partition key, nothing to migrate.
-		return nil
-	}
-	if partitionKey == wantKey {
-		return nil
-	}
-
-	c.log.Warn("migrating pcap_packets to add partition key; this may be slow for large tables")
-
-	old := c.packetsTable()
-	tmp := c.tableRef("pcap_packets_migration_tmp")
-
-	if err := c.conn.Exec(ctx, fmt.Sprintf("RENAME TABLE %s TO %s", old, tmp)); err != nil {
-		return fmt.Errorf("rename packets table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, applySchema(packetsSchemaSQL, old)); err != nil {
-		_ = c.conn.Exec(ctx, fmt.Sprintf("RENAME TABLE %s TO %s", tmp, old))
-		return fmt.Errorf("create partitioned packets table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT * FROM %s", old, tmp)); err != nil {
-		return fmt.Errorf("copy packets data to partitioned table: %w", err)
-	}
-	if err := c.conn.Exec(ctx, fmt.Sprintf("DROP TABLE %s", tmp)); err != nil {
-		return fmt.Errorf("drop old packets table: %w", err)
-	}
-
-	c.log.Info("pcap_packets migration complete")
 	return nil
 }
 

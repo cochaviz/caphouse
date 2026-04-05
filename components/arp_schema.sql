@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   sender_mac FixedString(6),
   sender_ip  IPv4,
   target_mac FixedString(6),
-  target_ip  IPv4
+  target_ip  IPv4,
+  INDEX idx_sender_ip (sender_ip) TYPE minmax GRANULARITY 4,
+  INDEX idx_target_ip (target_ip) TYPE minmax GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

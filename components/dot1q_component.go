@@ -3,7 +3,6 @@ package components
 import (
 	_ "embed"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -112,8 +111,3 @@ func (c *Dot1QComponent) ExportExpand(sessionID uint64, packetID uint32) []Compo
 }
 
 func (c *Dot1QComponent) Schema(table string) string { return applySchema(dot1qSchemaSQL, table) }
-func (c *Dot1QComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-	}
-}

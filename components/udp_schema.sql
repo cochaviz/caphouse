@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   src      UInt16,
   dst      UInt16,
   length   UInt16,
-  checksum UInt16
+  checksum UInt16,
+  INDEX idx_dst (dst) TYPE bloom_filter GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

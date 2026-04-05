@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/gopacket"
@@ -192,18 +191,6 @@ func (c *DNSComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *DNSComponent) Schema(table string) string { return applySchema(dnsSchemaSQL, table) }
-func (c *DNSComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS raw_len UInt16 CODEC(Delta, LZ4)", table),
-		// Drop the old invalid bloom filter on the nested-array column (if it exists).
-		fmt.Sprintf("ALTER TABLE %s DROP INDEX IF EXISTS idx_answers_ip", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_questions_name (questions_name) TYPE bloom_filter GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_rcode (rcode) TYPE set(256) GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_answers_name (answers_name) TYPE bloom_filter GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_answers_ip (answers_ip) TYPE bloom_filter GRANULARITY 4", table),
-	}
-}
 
 // encodeRRSection converts a slice of DNS resource records into parallel arrays.
 // The returned ip slice is populated only for A/AAAA records; other types get "".

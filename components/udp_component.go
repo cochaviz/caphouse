@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -83,9 +82,3 @@ func (c *UDPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *UDPComponent) Schema(table string) string { return applySchema(udpSchemaSQL, table) }
-func (c *UDPComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_dst (dst) TYPE bloom_filter GRANULARITY 4", table),
-	}
-}

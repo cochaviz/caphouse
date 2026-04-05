@@ -79,8 +79,3 @@ func (c *LinuxSLLComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *LinuxSLLComponent) Schema(table string) string { return applySchema(linuxsllSchemaSQL, table) }
-func (c *LinuxSLLComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-	}
-}

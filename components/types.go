@@ -111,7 +111,6 @@ type Component interface {
 	// The ClickHouse table name is "pcap_" + Name().
 	Name() string
 	Schema(table string) string
-	Indexes(table string) []string
 	FetchOrderBy() string
 }
 
