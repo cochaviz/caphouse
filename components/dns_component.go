@@ -68,7 +68,7 @@ const (
 	dnsFlagAA uint8 = 0x08
 
 	dnsFlagZMask  uint8 = 0x70
-	dnsFlagZShift       = 4
+	dnsFlagZShift uint8 = 4
 )
 
 func (c *DNSComponent) Kind() uint           { return ComponentDNS }
