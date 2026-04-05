@@ -11,51 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	tccontainers "github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/clickhouse"
 )
-
-var e2eClient *Client
-
-func init() {
-	var ctr *clickhouse.ClickHouseContainer
-	testSetups = append(testSetups, testSetup{
-		setup: func(ctx context.Context) error {
-			var err error
-			ctr, err = clickhouse.Run(ctx, "clickhouse/clickhouse-server:25.3",
-				tccontainers.WithEnv(map[string]string{
-					"CLICKHOUSE_USER":     "default",
-					"CLICKHOUSE_PASSWORD": "default",
-					"CLICKHOUSE_DB":       "caphouse_e2e",
-				}),
-			)
-			if err != nil {
-				return fmt.Errorf("start clickhouse container: %w", err)
-			}
-			dsn, err := ctr.ConnectionString(ctx)
-			if err != nil {
-				return fmt.Errorf("get connection string: %w", err)
-			}
-			e2eClient, err = New(ctx, Config{
-				DSN:       dsn,
-				Database:  "caphouse_e2e",
-				BatchSize: 50000,
-			})
-			if err != nil {
-				return fmt.Errorf("create client: %w", err)
-			}
-			if err := e2eClient.InitSchema(ctx); err != nil {
-				return fmt.Errorf("init schema: %w", err)
-			}
-			return nil
-		},
-		teardown: func() {
-			_ = e2eClient.Close()
-			_ = ctr.Terminate(context.Background())
-		},
-	})
-}
 
 // TestE2ERoundtrip ingests every classic PCAP file in testdata/ via
 // IngestPCAPStream and verifies byte-exact export. PCAPng files are covered
