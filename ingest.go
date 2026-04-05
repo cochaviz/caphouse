@@ -77,6 +77,14 @@ func (c *Client) CreateCapture(ctx context.Context, meta CaptureMeta) (uint64, e
 // FlushInterval elapses; call Flush to force an immediate flush.
 // CreateCapture must be called for p.SessionID before IngestPacket.
 func (c *Client) IngestPacket(ctx context.Context, linkType uint32, p Packet) error {
+	c.mu.Lock()
+	batchEmpty := len(c.batch) == 0
+	c.mu.Unlock()
+	if batchEmpty {
+		if err := c.enforceStorageCap(ctx, p.SessionID); err != nil {
+			return err
+		}
+	}
 	normalizePacket(&p)
 	return c.appendToBatch(ctx, encodePacket(linkType, p))
 }

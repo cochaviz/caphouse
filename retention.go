@@ -183,9 +183,24 @@ func (c *Client) deleteOrphanedSessions(ctx context.Context, candidateIDs []uint
 	return nil
 }
 
-func (c *Client) enforceStorageCap(ctx context.Context) error {
+// enforceStorageCap prunes oldest packet partitions until managed storage drops
+// under MaxStorageBytes.
+//
+// protectedSessionIDs are sessions currently being appended to. This matters
+// for append paths like IngestPacket: even when pruning runs before the new
+// packet is written, the target session may already exist in pcap_packets and
+// therefore be a pruning candidate. Protecting that session preserves the
+// "keep the newest/active capture" behavior while still dropping older data.
+func (c *Client) enforceStorageCap(ctx context.Context, protectedSessionIDs ...uint64) error {
 	if c.cfg.MaxStorageBytes == 0 {
 		return nil
+	}
+
+	protected := make(map[uint64]bool, len(protectedSessionIDs))
+	for _, id := range protectedSessionIDs {
+		if id != 0 {
+			protected[id] = true
+		}
 	}
 
 	before, err := c.storageUsageBytes(ctx)
@@ -208,10 +223,26 @@ func (c *Client) enforceStorageCap(ctx context.Context) error {
 			break
 		}
 
+		// I hope sessionIDs doesn't grow too large?
 		sessionIDs, err := c.sessionIDsInPartition(ctx, partition)
 		if err != nil {
 			return err
 		}
+
+		skipProtected := false
+		for _, id := range sessionIDs {
+			if protected[id] {
+				skipProtected = true
+				break
+			}
+		}
+		if skipProtected {
+			c.log.Debug("skipping protected partition during storage-cap pruning",
+				"partition", partition,
+			)
+			continue
+		}
+
 		if err := c.dropPacketsPartition(ctx, partition); err != nil {
 			return err
 		}
