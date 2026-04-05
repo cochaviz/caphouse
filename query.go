@@ -67,7 +67,7 @@ func (c *Client) SearchSQL(f Filter, sessionIDs []uint64, comps []string, limit,
 		}
 	}
 
-	idSQL, err := f.IDsSQL(c.tableRef, c.packetsTable(), sessionIDs, limit, offset, fromNs, toNs, asc)
+	idSQL, err := f.IDsSQL(c.tableRef, c.packetsTable(), sessionIDs, limit, offset, fromNs, toNs, asc, nil)
 	if err != nil {
 		return "", err
 	}

@@ -47,7 +47,7 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts) (io.ReadCloser, in
 	}
 
 	// Count matched packets using IDsSQL as a subquery.
-	idsSub, err := opts.Filter.IDsSQL(c.tableRef, c.packetsTable(), sessionIDs, 0, 0, fromNs, toNs, true)
+	idsSub, err := opts.Filter.IDsSQL(c.tableRef, c.packetsTable(), sessionIDs, 0, 0, fromNs, toNs, true, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -70,15 +70,10 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts) (io.ReadCloser, in
 		}
 	}
 
-	// Build the wide JOIN streaming SQL.
-	exportSQL, err := c.buildExportSQL(idsSub)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	pr, pw := io.Pipe()
 	go func() {
-		if err := c.streamExport(ctx, exportSQL, meta, pw, opts.PacketsWritten); err != nil {
+		err := c.streamExportPaginated(ctx, sessionIDs, fromNs, toNs, opts.Filter, meta, pw, opts.PacketsWritten)
+		if err != nil {
 			_ = pw.CloseWithError(err)
 			return
 		}
@@ -240,10 +235,34 @@ func splitCTECol(expr string) (bare, cteName string) {
 	return expr, expr
 }
 
-// streamExport writes the PCAP stream for the given wide JOIN SQL to w.
-func (c *Client) streamExport(
+// exportCursor holds the keyset pagination position after each page.
+// A zero-value cursor means "start from the beginning".
+type exportCursor struct {
+	Ts        int64
+	SessionID uint64
+	PacketID  uint32
+}
+
+// exportPageSize is the number of packets fetched per paginated export query.
+// Smaller pages reduce peak memory and avoid ClickHouse connection timeouts on
+// large captures at the cost of more round-trips.
+const exportPageSize = 50_000
+
+// scanEntry holds per-component scan state reused across rows within a page.
+type scanEntry struct {
+	comp       components.Component
+	scanBuf    *components.ScanBuf
+	repeatable components.RepeatableExporter
+}
+
+// streamExportPaginated writes a complete PCAP stream to w by issuing repeated
+// paginated queries of exportPageSize rows each. Pagination avoids ClickHouse
+// connection drops that occur when sorting millions of rows in a single query.
+func (c *Client) streamExportPaginated(
 	ctx context.Context,
-	exportSQL string,
+	sessionIDs []uint64,
+	fromNs, toNs int64,
+	filter Filter,
 	meta CaptureMeta,
 	w io.Writer,
 	packetsWritten *atomic.Int64,
@@ -258,20 +277,9 @@ func (c *Client) streamExport(
 		return err
 	}
 
-	rows, err := c.conn.Query(ctx, exportSQL)
-	if err != nil {
-		return fmt.Errorf("export query: %w", err)
-	}
-	defer rows.Close()
-
 	order := byteOrder(meta.Endianness)
 
-	// Pre-allocate one scanner entry per component kind; reused across rows.
-	type scanEntry struct {
-		comp       components.Component
-		scanBuf    *components.ScanBuf
-		repeatable components.RepeatableExporter
-	}
+	// Pre-allocate scan entries once; reused across all pages.
 	entries := make([]scanEntry, len(components.KnownComponentKinds))
 	for i, kind := range components.KnownComponentKinds {
 		comp := components.ComponentFactories[kind]()
@@ -288,6 +296,53 @@ func (c *Client) streamExport(
 		entries[i] = e
 	}
 
+	var cursor *exportCursor
+	for page := 0; ; page++ {
+		idsSub, err := filter.IDsSQL(c.tableRef, c.packetsTable(), sessionIDs,
+			exportPageSize, 0, fromNs, toNs, true, cursor)
+		if err != nil {
+			return fmt.Errorf("build page ids (page %d): %w", page, err)
+		}
+		exportSQL, err := c.buildExportSQL(idsSub)
+		if err != nil {
+			return fmt.Errorf("build export sql (page %d): %w", page, err)
+		}
+
+		n, next, err := c.streamExportPage(ctx, exportSQL, buf, order, entries, meta.TimeResolution, packetsWritten)
+		if err != nil {
+			return fmt.Errorf("export page %d: %w", page, err)
+		}
+		c.log.Debug("export page", "page", page, "rows", n)
+		if n < exportPageSize {
+			break // last page
+		}
+		cursor = &next
+	}
+
+	if err := buf.Flush(); err != nil {
+		return fmt.Errorf("flush pcap stream: %w", err)
+	}
+	return nil
+}
+
+// streamExportPage executes one page query and writes the resulting packet
+// records into buf. Returns the number of rows written and the cursor pointing
+// past the last row, for keyset pagination.
+func (c *Client) streamExportPage(
+	ctx context.Context,
+	exportSQL string,
+	buf *bufio.Writer,
+	order binary.ByteOrder,
+	entries []scanEntry,
+	timeResolution string,
+	packetsWritten *atomic.Int64,
+) (n int, next exportCursor, retErr error) {
+	rows, err := c.conn.Query(ctx, exportSQL)
+	if err != nil {
+		return 0, exportCursor{}, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
 	// Nucleus scan targets (7 columns); component targets appended per row.
 	var (
 		sessionID           uint64
@@ -300,7 +355,7 @@ func (c *Client) streamExport(
 	nucleusTargets := []any{
 		&sessionID, &packetID, &tsNs,
 		&inclLen, &truncExtra,
-		componentMask, // *big.Int scans UInt128 directly
+		componentMask,
 		&payload,
 	}
 
@@ -316,7 +371,7 @@ func (c *Client) streamExport(
 			}
 		}
 		if err := rows.Scan(targets...); err != nil {
-			return fmt.Errorf("scan export row: %w", err)
+			return n, next, fmt.Errorf("scan row %d: %w", n, err)
 		}
 		for _, e := range entries {
 			if e.scanBuf != nil {
@@ -349,25 +404,23 @@ func (c *Client) streamExport(
 
 		frame, err := reconstructFrame(nucleus, compList)
 		if err != nil {
-			return fmt.Errorf("reconstruct packet %d in session %d: %w",
-				packetID, sessionID, err)
+			return n, next, fmt.Errorf("reconstruct packet %d in session %d: %w", packetID, sessionID, err)
 		}
 
-		if err := writePacketRecord(buf, order, meta.TimeResolution, ts,
+		if err := writePacketRecord(buf, order, timeResolution, ts,
 			inclLen, inclLen+truncExtra, frame); err != nil {
-			return err
+			return n, next, err
 		}
 		if packetsWritten != nil {
 			packetsWritten.Add(1)
 		}
+		n++
+		next = exportCursor{Ts: tsNs, SessionID: sessionID, PacketID: packetID}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate export rows: %w", err)
+		return n, next, fmt.Errorf("iterate rows after %d: %w", n, err)
 	}
-	if err := buf.Flush(); err != nil {
-		return fmt.Errorf("flush pcap stream: %w", err)
-	}
-	return nil
+	return n, next, nil
 }
 
 // CountPackets returns the deduplicated number of packets stored for the given session.
