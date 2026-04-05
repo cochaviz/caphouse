@@ -1,0 +1,49 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+jobs:
+  throughput:
+    name: Throughput regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go test -tags "throughput regression" -v -timeout 600s ./...
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: throughput-results
+          path: benchmark_results/
+
+  compression:
+    name: Compression regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go test -tags "compression regression" -v -timeout 300s .
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compression-results
+          path: benchmark_results/
