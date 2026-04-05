@@ -75,10 +75,10 @@ func init() {
 			if err := compressionClient.InitSchema(ctx); err != nil {
 				return fmt.Errorf("init schema: %w", err)
 			}
-			if err := os.MkdirAll("testresults", 0o755); err != nil {
-				return fmt.Errorf("create testresults dir: %w", err)
+			if err := os.MkdirAll("test_results", 0o755); err != nil {
+				return fmt.Errorf("create test_results dir: %w", err)
 			}
-			cFile, err = os.Create("testresults/compression_ratio.csv")
+			cFile, err = os.Create("test_results/compression_ratio.csv")
 			if err != nil {
 				return fmt.Errorf("create compression_ratio.csv: %w", err)
 			}
@@ -89,7 +89,7 @@ func init() {
 				"ch_logical_bytes", "ch_compressed_bytes",
 				"ch_vs_file_ratio", "internal_ratio", "vs_ref_ratio",
 			})
-			tFile, err = os.Create("testresults/compression_by_table.csv")
+			tFile, err = os.Create("test_results/compression_by_table.csv")
 			if err != nil {
 				return fmt.Errorf("create compression_by_table.csv: %w", err)
 			}
@@ -100,7 +100,7 @@ func init() {
 				"compression_ratio",
 				"pct_of_total_logical", "pct_of_total_compressed",
 			})
-			pFile, err = os.Create("testresults/parse_ratio.csv")
+			pFile, err = os.Create("test_results/parse_ratio.csv")
 			if err != nil {
 				return fmt.Errorf("create parse_ratio.csv: %w", err)
 			}
@@ -242,6 +242,53 @@ func compressedSize(data []byte) (size uint64, method string) {
 	return uint64(buf.Len()), "gzip-9"
 }
 
+// compressionMeasure holds the results of a single PCAP compression measurement.
+type compressionMeasure struct {
+	FileBytes       uint64
+	RefBytes        uint64
+	RefMethod       string
+	LogicalBytes    uint64 // delta uncompressed bytes in ClickHouse
+	CompressedBytes uint64 // delta compressed bytes in ClickHouse
+	ByTableDelta    map[string]tableBytes
+}
+
+// ChVsFileRatio returns CompressedBytes / FileBytes: how many ClickHouse
+// compressed bytes are written per raw PCAP byte.
+func (m compressionMeasure) ChVsFileRatio() float64 {
+	return float64(m.CompressedBytes) / float64(m.FileBytes)
+}
+
+// measureCompression ingests the PCAP at path into compressionClient and
+// returns storage deltas measured from system.parts snapshots. It is shared
+// between TestCompressionRatio and TestCompressionRegression.
+func measureCompression(t *testing.T, ctx context.Context, path string) compressionMeasure {
+	t.Helper()
+	pcapData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	beforeByTable, beforeC, beforeU := storageSnapshot(t, ctx)
+	ingestPCAP(t, ctx, pcapData)
+	afterByTable, afterC, afterU := storageSnapshot(t, ctx)
+
+	delta := make(map[string]tableBytes, len(tables))
+	for _, tbl := range tables {
+		delta[tbl] = tableBytes{
+			compressed:   afterByTable[tbl].compressed - beforeByTable[tbl].compressed,
+			uncompressed: afterByTable[tbl].uncompressed - beforeByTable[tbl].uncompressed,
+		}
+	}
+	refSz, refMethod := compressedSize(pcapData)
+	return compressionMeasure{
+		FileBytes:       uint64(len(pcapData)),
+		RefBytes:        refSz,
+		RefMethod:       refMethod,
+		LogicalBytes:    afterU - beforeU,
+		CompressedBytes: afterC - beforeC,
+		ByTableDelta:    delta,
+	}
+}
+
 // TestCompressionRatio ingests each PCAP in testdata/ and reports how much
 // space the data occupies in ClickHouse relative to the original file. Sizes
 // are derived from the delta between two system.parts snapshots so the result
@@ -257,50 +304,35 @@ func TestCompressionRatio(t *testing.T) {
 	}
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			pcapData, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
+			m := measureCompression(t, ctx, path)
 
-			beforeByTable, beforeC, beforeU := storageSnapshot(t, ctx)
-			ingestPCAP(t, ctx, pcapData)
-			afterByTable, afterC, afterU := storageSnapshot(t, ctx)
+			chVsFile := m.ChVsFileRatio()
+			internal := float64(m.LogicalBytes) / float64(m.CompressedBytes)
+			vsRef := float64(m.CompressedBytes) / float64(m.RefBytes)
 
-			deltaC := afterC - beforeC
-			deltaU := afterU - beforeU
-			fileSize := uint64(len(pcapData))
-			refSz, refMethod := compressedSize(pcapData)
-
-			chVsFile := float64(deltaC) / float64(fileSize)
-			internal := float64(deltaU) / float64(deltaC)
-			vsRef := float64(deltaC) / float64(refSz)
-
-			t.Logf("PCAP file:                  %s", fmtBytes(fileSize))
-			t.Logf("%s compressed:       %s  (%.2fx file)", refMethod, fmtBytes(refSz), float64(refSz)/float64(fileSize))
-			t.Logf("ClickHouse logical size:    %s  (%.2fx file)", fmtBytes(deltaU), float64(deltaU)/float64(fileSize))
-			t.Logf("ClickHouse compressed size: %s  (%.2fx file)", fmtBytes(deltaC), chVsFile)
+			t.Logf("PCAP file:                  %s", fmtBytes(m.FileBytes))
+			t.Logf("%s compressed:       %s  (%.2fx file)", m.RefMethod, fmtBytes(m.RefBytes), float64(m.RefBytes)/float64(m.FileBytes))
+			t.Logf("ClickHouse logical size:    %s  (%.2fx file)", fmtBytes(m.LogicalBytes), float64(m.LogicalBytes)/float64(m.FileBytes))
+			t.Logf("ClickHouse compressed size: %s  (%.2fx file)", fmtBytes(m.CompressedBytes), chVsFile)
 			t.Logf("Internal compress ratio:    %.2fx  (logical → disk)", internal)
-			t.Logf("vs %s:              %.2fx", refMethod, vsRef)
+			t.Logf("vs %s:              %.2fx", m.RefMethod, vsRef)
 
 			t.Logf("%-22s  %10s  %10s  %8s  %8s  %8s",
 				"Table", "Logical", "Compressed", "Ratio", "%Logical", "%Compr")
 			for _, tbl := range tables {
-				before := beforeByTable[tbl]
-				after := afterByTable[tbl]
-				tblU := after.uncompressed - before.uncompressed
-				tblC := after.compressed - before.compressed
-				if tblU == 0 && tblC == 0 {
+				d := m.ByTableDelta[tbl]
+				if d.uncompressed == 0 && d.compressed == 0 {
 					continue
 				}
-				ratio := float64(tblU) / float64(tblC)
-				pctU := 100 * float64(tblU) / float64(deltaU)
-				pctC := 100 * float64(tblC) / float64(deltaC)
+				ratio := float64(d.uncompressed) / float64(d.compressed)
+				pctU := 100 * float64(d.uncompressed) / float64(m.LogicalBytes)
+				pctC := 100 * float64(d.compressed) / float64(m.CompressedBytes)
 				t.Logf("  %-20s  %10s  %10s  %7.2fx  %7.1f%%  %7.1f%%",
-					tbl, fmtBytes(tblU), fmtBytes(tblC), ratio, pctU, pctC)
+					tbl, fmtBytes(d.uncompressed), fmtBytes(d.compressed), ratio, pctU, pctC)
 				_ = tableCSV.Write([]string{
 					filepath.Base(path), tbl,
-					fmt.Sprintf("%d", tblU),
-					fmt.Sprintf("%d", tblC),
+					fmt.Sprintf("%d", d.uncompressed),
+					fmt.Sprintf("%d", d.compressed),
 					fmt.Sprintf("%.4f", ratio),
 					fmt.Sprintf("%.4f", pctU),
 					fmt.Sprintf("%.4f", pctC),
@@ -309,11 +341,11 @@ func TestCompressionRatio(t *testing.T) {
 
 			_ = compressionCSV.Write([]string{
 				filepath.Base(path),
-				fmt.Sprintf("%d", fileSize),
-				refMethod,
-				fmt.Sprintf("%d", refSz),
-				fmt.Sprintf("%d", deltaU),
-				fmt.Sprintf("%d", deltaC),
+				fmt.Sprintf("%d", m.FileBytes),
+				m.RefMethod,
+				fmt.Sprintf("%d", m.RefBytes),
+				fmt.Sprintf("%d", m.LogicalBytes),
+				fmt.Sprintf("%d", m.CompressedBytes),
 				fmt.Sprintf("%.4f", chVsFile),
 				fmt.Sprintf("%.4f", internal),
 				fmt.Sprintf("%.4f", vsRef),
