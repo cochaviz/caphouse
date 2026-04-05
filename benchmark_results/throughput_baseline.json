@@ -1,0 +1,26 @@
+{
+  "dns_small.pcap": {
+    "ingest_ns_per_op": 4482835,
+    "export_ns_per_op": 53471410
+  },
+  "http_small.pcap": {
+    "ingest_ns_per_op": 5206383,
+    "export_ns_per_op": 50397725
+  },
+  "packets-2026-02-07-19-0.pcap": {
+    "ingest_ns_per_op": 92360336,
+    "export_ns_per_op": 119922930
+  },
+  "precision.pcap": {
+    "ingest_ns_per_op": 201981566,
+    "export_ns_per_op": 320041239
+  },
+  "small.pcap": {
+    "ingest_ns_per_op": 3824856,
+    "export_ns_per_op": 64277678
+  },
+  "synflood_high.pcap": {
+    "ingest_ns_per_op": 10542147672,
+    "export_ns_per_op": 0
+  }
+}
