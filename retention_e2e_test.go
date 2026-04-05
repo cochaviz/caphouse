@@ -231,11 +231,11 @@ func TestRetentionPrunesBeforeAppend(t *testing.T) {
 func newRetentionTestClient(t *testing.T, ctx context.Context, dbName string, maxStorageBytes uint64) *Client {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := integrationClient.conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdent(dbName))); err != nil {
+	if err := e2eClient.conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdent(dbName))); err != nil {
 		t.Fatalf("create database %s: %v", dbName, err)
 	}
 	client, err := New(ctx, Config{
-		DSN:             integrationClient.cfg.DSN,
+		DSN:             e2eClient.cfg.DSN,
 		Database:        dbName,
 		BatchSize:       50_000,
 		MaxStorageBytes: maxStorageBytes,
@@ -261,8 +261,8 @@ func closeRetentionTestClient(t *testing.T, ctx context.Context, client *Client)
 		t.Fatalf("close client: %v", err)
 	}
 	adminClient, err := New(ctx, Config{
-		DSN:      integrationClient.cfg.DSN,
-		Database: integrationClient.cfg.Database,
+		DSN:      e2eClient.cfg.DSN,
+		Database: e2eClient.cfg.Database,
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

@@ -53,12 +53,12 @@ func TestE2EPcapNgCompat(t *testing.T) {
 			h.Write(data)
 			sessionID := binary.BigEndian.Uint64(h.Sum(nil)[0:8])
 
-			if _, err := integrationClient.IngestPCAPStream(ctx, bytes.NewReader(data), sessionID, "test", nil); err != nil {
+			if _, err := e2eClient.IngestPCAPStream(ctx, bytes.NewReader(data), sessionID, "test", nil); err != nil {
 				t.Fatalf("IngestPCAPStream: %v", err)
 			}
 
 			// Exported bytes must be a valid classic PCAP stream.
-			rc, _, err := integrationClient.Export(ctx, ExportOpts{SessionID: &sessionID})
+			rc, _, err := e2eClient.Export(ctx, ExportOpts{SessionID: &sessionID})
 			if err != nil {
 				t.Fatalf("Export: %v", err)
 			}
