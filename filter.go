@@ -253,6 +253,10 @@ func Parse(clause string) (Filter, error) {
 //
 // fromNs and toNs are optional Unix-nanosecond time bounds (0 = unset).
 // asc controls the ORDER BY direction; ignored when limit == 0.
+//
+// cursor enables keyset pagination: when non-zero the query adds a
+// (p.ts, p.session_id, p.packet_id) > (cursor.Ts, cursor.SessionID, cursor.PacketID)
+// WHERE condition instead of OFFSET, so each page is O(log N) rather than O(N).
 func (f Filter) IDsSQL(
 	tableRef func(string) string,
 	packets string,
@@ -260,6 +264,7 @@ func (f Filter) IDsSQL(
 	limit, offset int,
 	fromNs, toNs int64,
 	asc bool,
+	cursor *exportCursor,
 ) (string, error) {
 	if err := f.validateComponents(); err != nil {
 		return "", err
@@ -293,21 +298,26 @@ func (f Filter) IDsSQL(
 	if fromNs != 0 || toNs != 0 {
 		conditions = append(conditions, fmt.Sprintf("p.ts BETWEEN %d AND %d", fromNs, toNs))
 	}
+	if cursor != nil {
+		conditions = append(conditions, fmt.Sprintf(
+			"(p.ts, p.session_id, p.packet_id) > (%d, %d, %d)",
+			cursor.Ts, cursor.SessionID, cursor.PacketID))
+	}
 	if len(conditions) > 0 {
 		sb.WriteString("\nWHERE ")
 		sb.WriteString(strings.Join(conditions, " AND "))
 	}
 	if limit > 0 {
 		if asc {
-			sb.WriteString("\nORDER BY p.ts ASC")
+			sb.WriteString("\nORDER BY p.ts ASC, p.session_id ASC, p.packet_id ASC")
 		} else {
-			sb.WriteString("\nORDER BY p.ts DESC")
+			sb.WriteString("\nORDER BY p.ts DESC, p.session_id DESC, p.packet_id DESC")
 		}
 	}
 	sb.WriteString("\nLIMIT 1 BY p.session_id, p.packet_id")
 	if limit > 0 {
 		sb.WriteString(fmt.Sprintf("\nLIMIT %d", limit))
-		if offset > 0 {
+		if cursor == nil && offset > 0 {
 			sb.WriteString(fmt.Sprintf(" OFFSET %d", offset))
 		}
 	}
@@ -328,7 +338,7 @@ func (f Filter) SQL(tableRef func(string) string, packets string, sessionIDs []u
 		}
 	}
 
-	sub, err := f.IDsSQL(tableRef, packets, sessionIDs, 0, 0, 0, 0, false)
+	sub, err := f.IDsSQL(tableRef, packets, sessionIDs, 0, 0, 0, 0, false, nil)
 	if err != nil {
 		return "", err
 	}
