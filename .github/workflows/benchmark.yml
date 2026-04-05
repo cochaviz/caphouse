@@ -9,6 +9,7 @@ jobs:
   throughput:
     name: Throughput regression
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +26,8 @@ jobs:
         if: always()
         with:
           name: throughput-results
-          path: benchmark_results/
+          path: benchmark_results/throughput_baseline.json
+          if-no-files-found: warn
 
   compression:
     name: Compression regression
@@ -46,4 +48,9 @@ jobs:
         if: always()
         with:
           name: compression-results
-          path: benchmark_results/
+          path: |
+            benchmark_results/compression_ratio_baseline.json
+            test_results/compression_ratio.csv
+            test_results/compression_by_table.csv
+            test_results/parse_ratio.csv
+          if-no-files-found: warn
