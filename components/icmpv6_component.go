@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -82,9 +81,3 @@ func (c *ICMPv6Component) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *ICMPv6Component) Schema(table string) string { return applySchema(icmpv6SchemaSQL, table) }
-func (c *ICMPv6Component) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_type (type) TYPE set(256) GRANULARITY 4", table),
-	}
-}

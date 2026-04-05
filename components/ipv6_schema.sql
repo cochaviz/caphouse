@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   payload_len   UInt16 CODEC(Delta, LZ4),
   hop_limit     UInt8,
   flow_label    UInt32,
-  traffic_class UInt8
+  traffic_class UInt8,
+  INDEX idx_dst (dst) TYPE bloom_filter GRANULARITY 4,
+  INDEX idx_proto (protocol) TYPE set(256) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

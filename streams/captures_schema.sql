@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   first_packet_id UInt32,
   last_packet_id  UInt32,
   packet_count    UInt64,
-  byte_count      UInt64
+  byte_count      UInt64,
+  INDEX idx_l7_proto (l7_proto) TYPE bloom_filter GRANULARITY 4,
+  INDEX idx_dst_port (dst_port) TYPE set(512) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, stream_id)

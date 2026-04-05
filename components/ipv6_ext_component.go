@@ -3,7 +3,6 @@ package components
 import (
 	_ "embed"
 	"errors"
-	"fmt"
 
 	"github.com/google/gopacket"
 )
@@ -105,8 +104,3 @@ func (c *IPv6ExtComponent) ExportExpand(sessionID uint64, packetID uint32) []Com
 }
 
 func (c *IPv6ExtComponent) Schema(table string) string { return applySchema(ipv6ExtSchemaSQL, table) }
-func (c *IPv6ExtComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-	}
-}

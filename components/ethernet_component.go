@@ -3,7 +3,6 @@ package components
 import (
 	_ "embed"
 	"errors"
-	"fmt"
 	"net"
 
 	"github.com/google/gopacket"
@@ -90,8 +89,3 @@ func (c *EthernetComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *EthernetComponent) Schema(table string) string { return applySchema(ethernetSchemaSQL, table) }
-func (c *EthernetComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-	}
-}

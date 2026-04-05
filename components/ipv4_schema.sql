@@ -1,9 +1,8 @@
 
 CREATE TABLE IF NOT EXISTS {{ table }}
 (
-  session_id  UInt64 CODEC(LZ4),
-  packet_id  UInt32 CODEC(Delta, LZ4),
-
+  session_id    UInt64 CODEC(LZ4),
+  packet_id     UInt32 CODEC(Delta, LZ4),
   codec_version UInt16,
   layer_index   UInt16 CODEC(Delta, LZ4),
 
@@ -20,7 +19,9 @@ CREATE TABLE IF NOT EXISTS {{ table }}
   frag_offset  UInt16,
   ttl          UInt8,
   hdr_checksum UInt16,
-  options_raw  String CODEC(ZSTD(3))
+  options_raw  String CODEC(ZSTD(3)),
+  INDEX idx_dst (dst) TYPE bloom_filter GRANULARITY 4,
+  INDEX idx_proto (protocol) TYPE set(256) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)

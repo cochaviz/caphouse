@@ -3,7 +3,6 @@ package components
 import (
 	_ "embed"
 	"errors"
-	"fmt"
 	"net"
 
 	"github.com/google/gopacket"
@@ -101,10 +100,3 @@ func (c *ARPComponent) Encode(layer gopacket.Layer) ([]Component, error) {
 }
 
 func (c *ARPComponent) Schema(table string) string { return applySchema(arpSchemaSQL, table) }
-func (c *ARPComponent) Indexes(table string) []string {
-	return []string{
-		fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS layer_index UInt16 CODEC(Delta, LZ4)", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_sender_ip (sender_ip) TYPE minmax GRANULARITY 4", table),
-		fmt.Sprintf("ALTER TABLE %s ADD INDEX IF NOT EXISTS idx_target_ip (target_ip) TYPE minmax GRANULARITY 4", table),
-	}
-}

@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS {{ table }}
 
   type      UInt8,
   code      UInt8,
-  checksum  UInt16
+  checksum  UInt16,
+  INDEX idx_type (type) TYPE set(256) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree
 ORDER BY (session_id, packet_id)
