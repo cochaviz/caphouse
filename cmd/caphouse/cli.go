@@ -77,7 +77,7 @@ Examples:
   # Export all captures in a time window, filtered by destination IP
   caphouse -w --dsn="clickhouse://user:pass@localhost:9000/db" --capture=all \
     --from=2024-01-01T00:00:00Z --to=2024-01-01T01:00:00Z \
-    --query="ipv4.dst = '1.1.1.1'" merged.pcap
+    --filter="ipv4.dst = '1.1.1.1'" merged.pcap
 
   # Suppress all progress output (useful in scripts)
   caphouse -s --dsn="clickhouse://user:pass@localhost:9000/db" --sensor=myhost capture.pcap`
@@ -148,7 +148,7 @@ func rootCmd() *cobra.Command {
 				return errors.New("--capture all cannot be used with --read")
 			}
 			if componentsRaw != "" && queryExpr == "" {
-				return errors.New("--components requires --query")
+				return errors.New("--components requires --filter")
 			}
 			cfg := config{
 				dsn:           firstNonEmpty(dsn, os.Getenv("CAPHOUSE_DSN")),
@@ -210,8 +210,8 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&writeMode, "write", "w", false, "export a stored capture from ClickHouse as a PCAP file or stream")
 	cmd.Flags().StringVarP(&capture, "capture", "c", "", "capture UUID; omit or 'new' in read mode to create a new capture, required in write mode")
 	cmd.Flags().StringVar(&sensor, "sensor", "", "sensor name attached to the capture; defaults to system hostname in read mode")
-	cmd.Flags().StringVarP(&queryExpr, "query", "q", "", "ClickHouse WHERE clause filter (e.g. 'ipv4.dst = \\'1.1.1.1\\' AND tcp.dst = 443'); without --write prints equivalent SQL")
-	cmd.Flags().StringVarP(&componentsRaw, "components", "C", "", "comma-separated component tables to JOIN (e.g. ipv4,tcp,udp); only valid with --query")
+	cmd.Flags().StringVarP(&queryExpr, "filter", "f", "", "ClickHouse WHERE clause filter (e.g. 'ipv4.dst = \\'1.1.1.1\\' AND tcp.dst = 443'); without --write prints equivalent SQL")
+	cmd.Flags().StringVarP(&componentsRaw, "components", "C", "", "comma-separated component tables to JOIN (e.g. ipv4,tcp,udp); only valid with --filter")
 	cmd.Flags().StringVar(&fromStr, "from", "", "start of time window for --capture all (RFC 3339, e.g. 2024-01-01T00:00:00Z)")
 	cmd.Flags().StringVar(&toStr, "to", "", "end of time window for --capture all (RFC 3339, e.g. 2024-01-02T00:00:00Z)")
 
