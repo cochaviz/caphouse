@@ -12,7 +12,8 @@ at the column level while preserving lossless PCAP reconstruction.
 Read more and get started at the documentation site:
 <https://cochaviz.com/caphouse/>.
 
-> This project is still in an experimental state and should be used with caution!
+> This project is still in an experimental state and should be used with
+> caution! See the [note on experimental state](#note-on-experimental-state).
 
 ## Use cases
 
@@ -225,3 +226,27 @@ temporarily unavailable:
 ```sh
 caphouse-monitor -i eth0 -d "..." -D captures/
 ```
+
+
+## Note on Experimental State
+
+This project is in an experimental state. I personally use it for backing up
+network captures in the context of research, and we have some testing
+deployments for network sensors. Your mileage may vary depending on the
+application.
+
+Beyond maturity, there are various features (either functional or
+non-functional) that are missing before we can consider a pre-release
+stage:
+
+- Thorough test coverage: Most of the tests are happy-path, with some covering
+  explicit design decisions to avoid accidental regession. We need more thorough
+  coverage in various e2e scenarios to validate reliability.
+- High-throughput ingest/export: Now we're limited with ingest up to 10MB/s, and
+  similar export speed.
+- Clustered deployments: A single web interface couples to exactly one
+  ClickHouse instance. This might be problematic when working with a cluster of
+  network sensors.
+- Least privilege: An ingest account needs full creation/insertion/deletion
+  privileges. Depending on the deployment, this might or might not be problematic.
+  (Web needs read-only.)
