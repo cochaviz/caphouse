@@ -2,7 +2,7 @@
   <img
     src="docs/caphouse-banner.png"
     alt="caphouse logo and title"
-    width="256"
+    width="512"
   />
 </p>
 
