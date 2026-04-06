@@ -17,4 +17,4 @@ jobs:
         with:
           python-version: "3.x"
       - run: pip install -r docs/requirements.txt
-      - run: mkdocs gh-deploy --force
+      - run: mkdocs gh-deploy --force --config-file docs/mkdocs.yml

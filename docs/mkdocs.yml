@@ -4,6 +4,8 @@ site_url: https://cochaviz.github.io/caphouse/
 repo_url: https://github.com/cochaviz/caphouse
 repo_name: cochaviz/caphouse
 
+docs_dir: .
+
 theme:
   name: material
   palette:
@@ -50,4 +52,4 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.superfences
   - pymdownx.snippets:
-      base_path: .
+      base_path: ..
