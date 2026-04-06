@@ -1,5 +1,5 @@
 services:
-    app:
+    dev:
         build:
             context: .
             dockerfile: Dockerfile
@@ -14,6 +14,24 @@ services:
             clickhouse:
                 condition: service_healthy
 
+    caphouse-api:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        volumes:
+            - ..:/workspace:cached
+        working_dir: /workspace
+        command: air
+        environment:
+            CAPHOUSE_DSN: "clickhouse://default:@clickhouse:9000/default"
+        ports:
+            - "8081:8081"
+        depends_on:
+            clickhouse:
+                condition: service_healthy
+        profiles:
+            - caphouse-ui
+
     caphouse-ui:
         image: node:lts
         volumes:
@@ -21,7 +39,9 @@ services:
         working_dir: /workspace/caphouse-ui
         command: sh -c "npm install && npm run dev"
         ports:
-            - "8088:8080"
+            - "8080:8080"
+        profiles:
+            - caphouse-ui
 
     clickhouse:
         image: clickhouse/clickhouse-server

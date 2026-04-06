@@ -1,20 +1,19 @@
 {
     "name": "caphouse",
     "dockerComposeFile": "docker-compose.yml",
-    "service": "app",
+    "service": "dev",
     "workspaceFolder": "/workspace",
     "remoteUser": "vscode",
     "features": {
         "ghcr.io/devcontainers/features/docker-in-docker:2": {
             "moby": false
-        },
-        "ghcr.io/devcontainers/features/node:1": {},
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+        }
     },
     "customizations": {
         "vscode": {
             "extensions": [
-                "golang.go"
+                "golang.go",
+                "anthropic.claude-code"
             ],
             "settings": {
                 "go.toolsManagement.autoUpdate": true,
@@ -22,14 +21,21 @@
             }
         }
     },
-    "postCreateCommand": "go install golang.org/x/tools/gopls@latest && go install github.com/air-verse/air@latest && go mod download",
+    "postCreateCommand": {
+        "Install language server": "go install golang.org/x/tools/gopls@latest",
+        "Install `caphouse` to PATH": "go install ./... && caphouse install-scripts"
+    },
     "remoteEnv": {
         "GOPATH": "/go"
     },
     "forwardPorts": [
-        8080
+        8081,
+        8088
     ],
     "portsAttributes": {
+        "8081": {
+            "label": "caphouse-api"
+        },
         "8080": {
             "label": "caphouse-ui",
             "onAutoForward": "openBrowser"

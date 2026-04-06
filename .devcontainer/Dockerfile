@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/go
+FROM mcr.microsoft.com/devcontainers/go AS base
 
 # Install libpcap
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -6,6 +6,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tcpdump \
     # clear apt cache
     && rm -rf /var/lib/apt/lists/*
+
+
+# --- caphouse-api target
+FROM base AS api
+
+# Install air for live reloads. Go installs have to be
+# done as user, otherwise you'll get permission denied
+# issues later
+USER vscode
+RUN go install github.com/air-verse/air@latest
+USER root
+
+# --- devcontainer target
+FROM api AS dev
+
+# Install git-lfs for pulling test data
+RUN sudo apt-get install git-lfs
 
 # Install ClickHouse repository
 RUN sudo apt-get install -y apt-transport-https ca-certificates curl gnupg \

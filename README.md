@@ -65,27 +65,78 @@ caphouse --version
 
 ## Quick example
 
-Assuming you have a ClickHouse (native protocol, not HTTP:
-<https://clickhouse.com/docs/interfaces/overview>) instance running on
-`localhost:9000` with user `default`, password `default` and access to the
-`default` database, you can use `caphouse` for PCAP storage as follows:
+### Option A — use your own ClickHouse
+
+If you have a ClickHouse instance running (native protocol on `localhost:9000`),
+point `caphouse` at it directly:
 
 ```sh
-# Ingest (spits out the capture_id once finished)
-# DSN has the format clickhouse://<user>:<password>@<host>:<port>/<database>
-caphouse -d "clickhouse://default:default@localhost:9000/default" capture.pcap
+# DSN format: clickhouse://<user>:<password>@<host>:<port>/<database>
+export DSN="clickhouse://default:default@localhost:9000/default"
+
+# Ingest (prints the capture_id when done)
+caphouse -d "$DSN" capture.pcap
 
 # Ingest multiple files or a glob
-caphouse -d "..." ring*.pcap
+caphouse -d "$DSN" ring*.pcap
 
-# Keep caphouse-managed ClickHouse storage under 100 GiB
-caphouse -d "..." --max-storage 100GiB capture.pcap
+# Keep caphouse-managed storage under 100 GiB
+caphouse -d "$DSN" --max-storage 100GiB capture.pcap
 
 # Export
-caphouse -w -d "..." -c "<capture_id>" out.pcap
+caphouse -w -d "$DSN" -c "<capture_id>" out.pcap
 
 # Filter and export
-caphouse -w -d "..." -c "<capture_id>" -f "ipv4.addr = '10.0.0.1' AND tcp.dst = 443" filtered.pcap
+caphouse -w -d "$DSN" -c "<capture_id>" -f "ipv4.addr = '10.0.0.1' AND tcp.dst = 443" filtered.pcap
+```
+
+### Option B — spin up a local test environment
+
+No ClickHouse? The devcontainer stack bundles one. First, copy the env file:
+
+```sh
+cp .devcontainer/.env.example .devcontainer/.env
+```
+
+Then bring up the stack:
+
+```sh
+docker compose -f .devcontainer/docker-compose.yml up --build -d
+```
+
+The `.env` file sets `COMPOSE_PROFILES=caphouse-ui` by default, so this starts
+`clickhouse`, `dev`, `caphouse-api` (with hot reload via `air`), and
+`caphouse-ui` together. The UI is then available at `http://localhost:8080` and
+the API at `http://localhost:8081`.
+
+To start only the core services (without the API and UI), remove or unset
+`COMPOSE_PROFILES` in `.devcontainer/.env`.
+
+### Load test data
+
+The repository ships sample captures under `testdata/` tracked with
+[Git LFS](https://git-lfs.com). Retrieve them with:
+
+```sh
+git lfs pull
+```
+
+`git-lfs` is pre-installed in the devcontainer `dev` image. For Option A,
+install it from <https://git-lfs.com> first.
+
+Once the files are available, ingest them:
+
+**Option A** — from your local shell:
+
+```sh
+caphouse -d "$DSN" testdata/*.pcap
+```
+
+**Option B** — open a shell in the `dev` container and run:
+
+```sh
+docker compose -f .devcontainer/docker-compose.yml exec dev bash
+caphouse testdata/*.pcap
 ```
 
 More usage examples can be found in the
@@ -128,32 +179,15 @@ The repository ships two container images:
 - [`caphouse-ui/Dockerfile`](./caphouse-ui/Dockerfile) builds the frontend as a
   static site and serves it with nginx.
 
-### Easiest way to get started
+### Development stack
 
-For the quickest end-to-end setup, use the devcontainer stack in
-[`./.devcontainer/docker-compose.yml`](./.devcontainer/docker-compose.yml). That
-stack includes a `clickhouse` service for you, so you do not need to provision
-an external database just to try caphouse.
+The devcontainer compose file ([`.devcontainer/docker-compose.yml`](./.devcontainer/docker-compose.yml))
+includes a bundled ClickHouse service. See [Quick example — Option B](#option-b--spin-up-a-local-test-environment)
+above for the exact commands.
 
-If you want to run that stack directly with Docker Compose:
-
-```sh
-docker compose -f .devcontainer/docker-compose.yml up --build -d
-docker compose -f .devcontainer/docker-compose.yml exec app go run ./cmd/caphouse-api
-```
-
-If you are using VS Code or another devcontainer-capable editor, open the repo
-in the devcontainer and run the same API command inside the `app` container:
-
-```sh
-go run ./cmd/caphouse-api
-```
-
-The UI service from the same compose file runs with live reload and talks to
-the API over the internal Docker network. When running the compose stack
-directly, the UI is published on `http://localhost:8088`, and the app
-container already has `CAPHOUSE_DSN=clickhouse://default:@clickhouse:9000/default`
-set for the bundled ClickHouse service.
+When working inside a devcontainer-capable editor (VS Code, JetBrains), open
+the repo in the devcontainer: the `dev` container starts automatically with
+`CAPHOUSE_DSN` pre-set and `air` available for hot-reloading the API.
 
 ### Production images
 
