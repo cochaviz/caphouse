@@ -10,7 +10,7 @@ caphouse stores network packet captures in ClickHouse, making them queryable
 at the column level while preserving lossless PCAP reconstruction.
 
 Read more and get started at the documentation site:
-<https://cochaviz.github.io/caphouse/>.
+<https://cochaviz.com/caphouse/>.
 
 > This project is still in an experimental state and should be used with caution!
 
