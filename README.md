@@ -1,12 +1,10 @@
 <p align="center">
   <img
-    src="docs/caphouse-logo.png"
-    alt="caphouse logo"
-    width="96"
+    src="docs/caphouse-banner.png"
+    alt="caphouse logo and title"
+    width="256"
   />
 </p>
-
-# caphouse
 
 caphouse stores network packet captures in ClickHouse, making them queryable
 at the column level while preserving lossless PCAP reconstruction.
