@@ -1,0 +1,17 @@
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: hsl(250, 40%, 68%);
+  --md-primary-fg-color--light: hsl(250, 40%, 78%);
+  --md-primary-fg-color--dark: hsl(250, 40%, 58%);
+  --md-primary-bg-color: hsl(250, 30%, 15%);
+  --md-primary-bg-color--light: hsl(250, 30%, 25%);
+  --md-accent-fg-color: hsl(250, 40%, 68%);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: hsl(250, 35%, 40%);
+  --md-primary-fg-color--light: hsl(250, 35%, 50%);
+  --md-primary-fg-color--dark: hsl(250, 35%, 30%);
+  --md-primary-bg-color: hsl(250, 40%, 88%);
+  --md-primary-bg-color--light: hsl(250, 40%, 95%);
+  --md-accent-fg-color: hsl(250, 40%, 68%);
+}
