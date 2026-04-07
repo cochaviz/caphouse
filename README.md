@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src="docs/caphouse-banner.png"
+    src="https://cochaviz.com/caphouse/caphouse-banner.png"
     alt="caphouse logo and title"
     width="512"
   />
@@ -38,7 +38,7 @@ overview, SQL exploration, GeoIP enrichment, and AI-assisted SQL generation.
 
 <p align="center">
   <img
-    src="docs/caphouse-ui-preview.png"
+    src="https://cochaviz.com/caphouse/caphouse-ui-preview.png"
     alt="caphouse-ui preview showing the search bar, histogram, packet table, and packet details"
     width="100%"
   />
