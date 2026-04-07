@@ -5,6 +5,7 @@ repo_url: https://github.com/cochaviz/caphouse
 repo_name: cochaviz/caphouse
 
 docs_dir: .
+site_dir: ../site
 
 theme:
   name: material
