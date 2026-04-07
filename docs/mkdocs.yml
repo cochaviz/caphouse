@@ -9,6 +9,7 @@ site_dir: ../site
 
 theme:
   name: material
+  logo: caphouse-logo.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
