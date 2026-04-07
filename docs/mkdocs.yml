@@ -54,4 +54,4 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.superfences
   - pymdownx.snippets:
-      base_path: ..
+      base_path: .
