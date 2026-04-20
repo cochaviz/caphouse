@@ -1,0 +1,1159 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Store and query PCAP files in ClickHouse — parsed, compressed, and reconstructible on demand.">
+      
+      
+      
+        <link rel="canonical" href="https://cochaviz.github.io/caphouse/quickstart/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../filters/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Quickstart - caphouse</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../custom.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#quickstart" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="caphouse" class="md-header__button md-logo" aria-label="caphouse" data-md-component="logo">
+      
+  <img src="../caphouse-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            caphouse
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Quickstart
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cochaviz/caphouse" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cochaviz/caphouse
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../filters/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Filter Syntax
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../development/" class="md-tabs__link">
+          
+  
+  
+  Contributing
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="caphouse" class="md-nav__button md-logo" aria-label="caphouse" data-md-component="logo">
+      
+  <img src="../caphouse-logo.png" alt="logo">
+
+    </a>
+    caphouse
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cochaviz/caphouse" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cochaviz/caphouse
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-ingest-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Ingest a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-export-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Export a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-export-across-all-captures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Export across all captures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-query-packets-directly-with-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Query packets directly with SQL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sanitize-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Sanitize a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-explore-captures-in-the-browser-with-caphouse-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Explore captures in the browser with caphouse-ui
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-capture-with-bounded-disk-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous capture with bounded disk usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../filters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filter Syntax
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    All Flags
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage & Compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-ingest-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Ingest a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-export-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Export a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-export-across-all-captures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Export across all captures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-query-packets-directly-with-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Query packets directly with SQL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sanitize-a-pcap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Sanitize a PCAP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-explore-captures-in-the-browser-with-caphouse-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Explore captures in the browser with caphouse-ui
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-capture-with-bounded-disk-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous capture with bounded disk usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="quickstart">Quickstart</h1>
+<h2 id="1-ingest-a-pcap">1. Ingest a PCAP</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># From a file — prints the capture UUID on completion</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;clickhouse://user:pass@localhost:9000/default&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">         </span>--sensor<span class="w"> </span>myhost<span class="w"> </span>capture.pcap
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># From tcpdump over a pipe</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>tcpdump<span class="w"> </span>-i<span class="w"> </span>eth0<span class="w"> </span>-w<span class="w"> </span>-<span class="w"> </span><span class="p">|</span><span class="w"> </span>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># Ingest multiple files or a glob in one command</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>--sensor<span class="w"> </span>myhost<span class="w"> </span>ring*.pcap
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># Keep caphouse-managed ClickHouse storage under 100 GiB</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>--sensor<span class="w"> </span>myhost<span class="w"> </span>--max-storage<span class="w"> </span>100GiB<span class="w"> </span>capture.pcap
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Append to an existing capture</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>more.pcap<span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1"># Disable L7 protocol detection (faster ingest, no stream tracking)</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>--no-streams<span class="w"> </span>capture.pcap
+</code></pre></div>
+<p>The schema is created automatically on the first ingest.</p>
+<p>When <code>--max-storage</code> is set, caphouse measures compressed bytes across its own
+<code>pcap_*</code> and <code>stream_*</code> tables after each successful ingest and prunes whole
+oldest captures until usage drops under the configured cap or only the newest
+just-ingested capture remains.</p>
+<p>PCAPng files (<code>.pcapng</code>) are also accepted. They are converted to classic PCAP
+on ingest — non-packet blocks are discarded and the exported result is always a
+valid classic PCAP stream. No byte-exact round-trip is guaranteed for PCAPng
+sources.</p>
+<h2 id="2-export-a-pcap">2. Export a PCAP</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Export an entire capture to a file</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>out.pcap
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Stream into tcpreplay</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span><span class="p">|</span><span class="w"> </span>tcpreplay<span class="w"> </span>--intf1<span class="o">=</span>eth0<span class="w"> </span>-
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Export only matching packets</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.addr = &#39;10.0.0.1&#39; AND tcp.dst = 443&quot;</span><span class="w"> </span>filtered.pcap
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Pipe filtered packets into tcpdump for live inspection</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.src = &#39;10.0.0.1&#39;&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tcpdump<span class="w"> </span>-r<span class="w"> </span>-
+</code></pre></div>
+<p>See <a href="../filters/">Filter Syntax</a> for the full filter reference.</p>
+<h2 id="3-export-across-all-captures">3. Export across all captures</h2>
+<p>Use <code>--capture all</code> (or <code>-c all</code>) together with mandatory <code>--from</code> and <code>--to</code>
+bounds to merge packets from every stored capture into a single time-sorted PCAP.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Merge all captures from a one-hour window into a single file</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>all<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--from<span class="w"> </span><span class="m">2024</span>-01-01T00:00:00Z<span class="w"> </span>--to<span class="w"> </span><span class="m">2024</span>-01-01T01:00:00Z<span class="w"> </span>merged.pcap
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Same, with an additional filter</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>caphouse<span class="w"> </span>-w<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>all<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>--from<span class="w"> </span><span class="m">2024</span>-01-01T00:00:00Z<span class="w"> </span>--to<span class="w"> </span><span class="m">2024</span>-01-01T01:00:00Z<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>-f<span class="w"> </span><span class="s2">&quot;tcp.dst = 443&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tcpdump<span class="w"> </span>-r<span class="w"> </span>-
+</code></pre></div>
+<p>A warning is printed when the merged output contains captures with different
+link types, as the resulting PCAP will use the link type of the first capture.</p>
+<h2 id="4-query-packets-directly-with-sql">4. Query packets directly with SQL</h2>
+<p><code>-f</code> without <code>-w</code> prints the equivalent ClickHouse <code>SELECT</code> statement with all
+parameters inlined — ready to pipe into <code>clickhouse-client</code> or tweak by hand.
+No packets are read or exported; the output is pure SQL.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Print the SQL for a filter</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.addr = &#39;10.0.0.1&#39;&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Run it directly</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.addr = &#39;10.0.0.1&#39;&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>clickhouse-client<span class="w"> </span>--multiquery
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Add protocol columns with --components / -C</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;tcp.dst = 443&quot;</span><span class="w"> </span>-C<span class="w"> </span>ipv4,tcp<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>clickhouse-client<span class="w"> </span>--multiquery
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="c1"># Export as CSV</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;tcp.dst = 443&quot;</span><span class="w"> </span>-C<span class="w"> </span>ipv4,tcp<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>clickhouse-client<span class="w"> </span>--multiquery<span class="w"> </span>--format<span class="w"> </span>CSVWithNames<span class="w"> </span>&gt;<span class="w"> </span>packets.csv
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="c1"># Export as JSON</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;tcp.dst = 443&quot;</span><span class="w"> </span>-C<span class="w"> </span>ipv4,tcp<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>clickhouse-client<span class="w"> </span>--multiquery<span class="w"> </span>--format<span class="w"> </span>JSONEachRow<span class="w"> </span>&gt;<span class="w"> </span>packets.jsonl
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="c1"># Save, edit, then run</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>&lt;uuid&gt;<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.addr = &#39;10.0.0.1&#39;&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>query.sql
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="nv">$EDITOR</span><span class="w"> </span>query.sql
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>clickhouse-client<span class="w"> </span>--multiquery<span class="w"> </span>&lt;<span class="w"> </span>query.sql
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="c1"># Query across all captures (requires --from and --to)</span>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>caphouse<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-c<span class="w"> </span>all<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="w">  </span>--from<span class="w"> </span><span class="m">2024</span>-01-01T00:00:00Z<span class="w"> </span>--to<span class="w"> </span><span class="m">2024</span>-01-01T01:00:00Z<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="w">  </span>-f<span class="w"> </span><span class="s2">&quot;ipv4.addr = &#39;10.0.0.1&#39;&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>clickhouse-client<span class="w"> </span>--multiquery
+</code></pre></div>
+<h2 id="5-sanitize-a-pcap">5. Sanitize a PCAP</h2>
+<p><code>caphouse-sanitize</code> replaces every public IP and MAC address with a
+deterministic pseudonym so captures can be shared without exposing real
+addresses. Private, loopback, link-local, and multicast addresses are left
+unchanged, preserving internal network topology.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Anonymize a single file; seed is random and printed to stderr</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>caphouse-sanitize<span class="w"> </span>-i<span class="w"> </span>capture.pcap<span class="w"> </span>-o<span class="w"> </span>sanitized.pcap
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Reproducible mapping — use the same seed to get the same pseudonyms</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>caphouse-sanitize<span class="w"> </span>--seed<span class="w"> </span>&lt;<span class="m">64</span>-hex-chars&gt;<span class="w"> </span>-i<span class="w"> </span>capture.pcap<span class="w"> </span>-o<span class="w"> </span>sanitized.pcap
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Anonymize all *.pcap files in a folder (filenames preserved)</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>caphouse-sanitize<span class="w"> </span>-i<span class="w"> </span>captures/<span class="w"> </span>-o<span class="w"> </span>sanitized/
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="c1"># Stream from stdin to stdout</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>tcpdump<span class="w"> </span>-i<span class="w"> </span>eth0<span class="w"> </span>-w<span class="w"> </span>-<span class="w"> </span><span class="p">|</span><span class="w"> </span>caphouse-sanitize<span class="w"> </span>&gt;<span class="w"> </span>sanitized.pcap
+</code></pre></div>
+<p>The seed is a 32-byte value encoded as 64 hex characters. When omitted a
+random seed is generated and printed to stderr — keep it if you need to
+reproduce the mapping later.</p>
+<h2 id="6-explore-captures-in-the-browser-with-caphouse-ui">6. Explore captures in the browser with caphouse-ui</h2>
+<p>For a hosted workflow, run <code>caphouse-api</code> against the same ClickHouse database
+and place <code>caphouse-ui</code> in front of it. The UI expects the API on the same
+origin under <code>/v1</code>, with <code>/docs</code> and <code>/openapi.json</code> exposed as well.</p>
+<p>The quickest way to try this repository is the devcontainer stack in
+<a href="../.devcontainer/docker-compose.yml"><code>../.devcontainer/docker-compose.yml</code></a>.
+Unlike the production compose file, it includes a <code>clickhouse</code> service for you.
+Run it like this:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>.devcontainer/docker-compose.yml<span class="w"> </span>up<span class="w"> </span>--build<span class="w"> </span>-d
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>.devcontainer/docker-compose.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>app<span class="w"> </span>go<span class="w"> </span>run<span class="w"> </span>./cmd/caphouse-api
+</code></pre></div>
+<p>Or open the repo in the devcontainer and start the API from the <code>app</code>
+container:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>go<span class="w"> </span>run<span class="w"> </span>./cmd/caphouse-api
+</code></pre></div>
+<p>The UI service from the same compose file already runs in development mode and
+proxies to the API over the Docker network. If you run that compose file
+directly, the UI is exposed on <code>http://localhost:8088</code>.</p>
+<p>The browser UI is best for:</p>
+<ul>
+<li>Searching packets with the same filter syntax used by <code>caphouse -f</code></li>
+<li>Zooming and breaking down packet timelines in the histogram</li>
+<li>Inspecting packet layers, hex dumps, and GeoIP-enriched addresses</li>
+<li>Reviewing stream/session summaries for HTTP, TLS, and SSH traffic</li>
+<li>Building and running SQL from the Query page, with optional AI-assisted SQL
+  generation when <code>ANTHROPIC_API_KEY</code> is configured on <code>caphouse-api</code></li>
+</ul>
+<p>The repository contains both pieces:</p>
+<ul>
+<li><code>cmd/caphouse-api/</code> for the HTTP API server</li>
+<li><code>caphouse-ui/</code> for the React frontend</li>
+</ul>
+<p>For production, use <a href="../Dockerfile"><code>../Dockerfile</code></a> for the API and
+<a href="../caphouse-ui/Dockerfile"><code>../caphouse-ui/Dockerfile</code></a> for the UI. The
+repository-level <a href="../docker-compose.yml"><code>../docker-compose.yml</code></a> builds those
+two services, but it does <strong>not</strong> include ClickHouse; set <code>CAPHOUSE_DSN</code> to an
+external ClickHouse instance and add your own port/reverse-proxy configuration.</p>
+<h2 id="continuous-capture-with-bounded-disk-usage">Continuous capture with bounded disk usage</h2>
+<p>caphouse reads discrete files — it does not do live capture. The companion
+script <code>caphouse-monitor</code> wraps tcpdump's built-in rotation with caphouse
+ingest: each completed file is ingested into ClickHouse and then removed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>caphouse-monitor<span class="w"> </span>-i<span class="w"> </span>eth0<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;clickhouse://user:pass@localhost:9000/default&quot;</span><span class="w"> </span>-s<span class="w"> </span>myhost
+</code></pre></div>
+<p>By default, tcpdump rotates every 60 seconds. Override with <code>-t SECS</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>caphouse-monitor<span class="w"> </span>-i<span class="w"> </span>eth0<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span>-s<span class="w"> </span>myhost<span class="w"> </span>-t<span class="w"> </span><span class="m">300</span><span class="w">  </span><span class="c1"># rotate every 5 minutes</span>
+</code></pre></div>
+<p>The capture directory defaults to <code>/var/capture</code>. Override with <code>-D DIR</code>.
+The DSN can also be provided via <code>CAPHOUSE_DSN</code>.</p>
+<p>Files are only removed after a successful ingest. If ClickHouse is temporarily
+unavailable, caphouse retries with exponential backoff and jitter; if it
+ultimately fails the file is left on disk for the next rotation cycle.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.instant", "navigation.top", "content.code.copy", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
