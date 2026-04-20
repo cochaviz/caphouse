@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"sync"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 
 	"github.com/google/uuid"
 )

@@ -1,4 +1,4 @@
-module caphouse
+module github.com/cochaviz/caphouse
 
 go 1.25.4
 

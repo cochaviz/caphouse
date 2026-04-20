@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 type idRange struct{ lo, hi uint32 }

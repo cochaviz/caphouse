@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 // ReEncodeResult summarises a re-encoding run.

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"caphouse/streams"
+	"github.com/cochaviz/caphouse/streams"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"

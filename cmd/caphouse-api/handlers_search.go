@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"caphouse"
+	"github.com/cochaviz/caphouse"
 	"github.com/danielgtaylor/huma/v2"
 )
 

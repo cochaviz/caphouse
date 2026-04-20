@@ -3,7 +3,7 @@ package caphouse
 import (
 	"context"
 
-	"caphouse/geoip"
+	"github.com/cochaviz/caphouse/geoip"
 )
 
 // InitGeoIP creates/refreshes the city and ASN dictionaries in ClickHouse.

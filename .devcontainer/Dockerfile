@@ -22,7 +22,7 @@ USER root
 FROM api AS dev
 
 # Install git-lfs for pulling test data
-RUN sudo apt-get install git-lfs
+# RUN sudo apt-get install git-lfs
 
 # Install ClickHouse repository
 RUN sudo apt-get install -y apt-transport-https ca-certificates curl gnupg \

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"caphouse"
+	"github.com/cochaviz/caphouse"
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/danielgtaylor/huma/v2"
 )

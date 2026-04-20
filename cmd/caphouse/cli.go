@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"caphouse"
+	"github.com/cochaviz/caphouse"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
@@ -127,7 +127,7 @@ func rootCmd() *cobra.Command {
 	var noStreams bool
 
 	cmd := &cobra.Command{
-		Use:     "caphouse",
+		Use:     "github.com/cochaviz/caphouse",
 		Short:   "Store and export classic PCAPs in ClickHouse",
 		Long:    longDescription,
 		Version: resolveVersion(),

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/gopacket"

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 // registryComponents is the set of valid component names, populated from the

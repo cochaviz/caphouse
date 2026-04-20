@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"caphouse"
+	"github.com/cochaviz/caphouse"
 
 	"github.com/google/gopacket/pcapgo"
 	tccontainers "github.com/testcontainers/testcontainers-go"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 type mockClient struct {

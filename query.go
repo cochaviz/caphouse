@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 // queryJSON executes a raw SQL string and returns all rows as JSON-serialisable maps.

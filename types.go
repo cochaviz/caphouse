@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 // Config controls the ClickHouse connection and ingest behavior.

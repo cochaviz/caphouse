@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"caphouse"
-	"caphouse/geoip"
+	"github.com/cochaviz/caphouse"
+	"github.com/cochaviz/caphouse/geoip"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 func (c *Client) managedTableNames() []string {

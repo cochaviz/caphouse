@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 func TestNestedComponentFields(t *testing.T) {

@@ -3,7 +3,7 @@ package streams_test
 import (
 	"testing"
 
-	"caphouse/streams"
+	"github.com/cochaviz/caphouse/streams"
 	"github.com/google/uuid"
 )
 

@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"caphouse"
+	"github.com/cochaviz/caphouse"
 )
 
 // ingestProgress tracks bytes read and packets ingested atomically.

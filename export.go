@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"caphouse/components"
+	"github.com/cochaviz/caphouse/components"
 )
 
 // ExportOpts configures a call to Export.

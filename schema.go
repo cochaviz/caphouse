@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"caphouse/components"
-	"caphouse/streams"
+	"github.com/cochaviz/caphouse/components"
+	"github.com/cochaviz/caphouse/streams"
 )
 
 //go:embed captures_schema.sql
