@@ -63,6 +63,7 @@ done
 [ -n "$SENSOR" ] || { echo "caphouse-monitor: sensor is required (-s)" >&2; exit 1; }
 
 mkdir -p "$DIR"
+chown tcpdump:tcpdump "$DIR"
 
 # Export DSN so caphouse picks it up from the environment.
 export CAPHOUSE_DSN="$DSN"
