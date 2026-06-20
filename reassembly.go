@@ -76,9 +76,9 @@ func (c *Client) fetchComponentBatch(
 			return nil, fmt.Errorf("data columns for %s: %w", proto.Name(), err)
 		}
 		q := fmt.Sprintf(
-			"SELECT %s FROM %s FINAL WHERE session_id = ? AND %s ORDER BY %s ASC",
+			"SELECT %s FROM %s WHERE session_id = ? AND %s ORDER BY %s ASC LIMIT 1 BY session_id, %s",
 			strings.Join(scanCols, ", "),
-			c.tableRef(components.ComponentTable(proto)), whereClause, proto.FetchOrderBy(),
+			c.tableRef(components.ComponentTable(proto)), whereClause, proto.FetchOrderBy(), proto.FetchOrderBy(),
 		)
 		rows, err := c.conn.Query(ctx, q, args...)
 		if err != nil {
@@ -185,7 +185,7 @@ func (c *Client) fetchReconstructedPackets(ctx context.Context, sessionID uint64
 		end := min(start+maxRangesPerQuery, len(ranges))
 		chunk := ranges[start:end]
 		whereClause, whereArgs := rangeArgs(sessionID, chunk)
-		q := fmt.Sprintf("%s FROM %s FINAL WHERE session_id = ? AND %s ORDER BY packet_id ASC",
+		q := fmt.Sprintf("%s FROM %s WHERE session_id = ? AND %s ORDER BY packet_id ASC LIMIT 1 BY session_id, packet_id",
 			selectCols, c.packetsTable(), whereClause)
 		rows, err := c.conn.Query(ctx, q, whereArgs...)
 		if err != nil {

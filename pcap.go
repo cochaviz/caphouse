@@ -135,7 +135,7 @@ func scanCaptureMeta(scan func(dest ...any) error) (CaptureMeta, error) {
 func (c *Client) FetchAllSessions(ctx context.Context) ([]CaptureMeta, error) {
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s FINAL ORDER BY session_id ASC",
+		"SELECT %s FROM %s ORDER BY session_id ASC LIMIT 1 BY session_id",
 		cols, c.capturesTable(),
 	)
 	rows, err := c.conn.Query(ctx, query)

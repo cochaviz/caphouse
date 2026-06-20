@@ -53,7 +53,7 @@ func (c *Client) ReEncodePackets(ctx context.Context, sessionIDs []uint64) (ReEn
 		innerWhere = fmt.Sprintf("bitAnd(toUInt64(components), %d) = 0", l4mask)
 	}
 	innerSQL := fmt.Sprintf(
-		"SELECT session_id, packet_id FROM %s FINAL WHERE %s ORDER BY session_id ASC, packet_id ASC",
+		"SELECT session_id, packet_id FROM %s WHERE %s ORDER BY session_id ASC, packet_id ASC LIMIT 1 BY session_id, packet_id",
 		c.packetsTable(), innerWhere,
 	)
 

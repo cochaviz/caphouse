@@ -430,7 +430,7 @@ func (c *Client) streamExportPage(
 
 // CountPackets returns the deduplicated number of packets stored for the given session.
 func (c *Client) CountPackets(ctx context.Context, sessionID uint64) (int64, error) {
-	q := fmt.Sprintf("SELECT count() FROM %s FINAL WHERE session_id = ?", c.packetsTable())
+	q := fmt.Sprintf("SELECT count() FROM (SELECT session_id, packet_id FROM %s WHERE session_id = ? LIMIT 1 BY session_id, packet_id)", c.packetsTable())
 	var n uint64
 	if err := c.conn.QueryRow(ctx, q, sessionID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count packets: %w", err)
@@ -446,7 +446,7 @@ func (c *Client) fetchCaptureMetaMap(ctx context.Context, sessionIDs []uint64) (
 	}
 	cols := strings.Join(CaptureMeta{}.ScanColumns(), ", ")
 	q := fmt.Sprintf(
-		"SELECT %s FROM %s FINAL WHERE %s",
+		"SELECT %s FROM %s WHERE %s LIMIT 1 BY session_id",
 		cols, c.capturesTable(), sessionInSQL(sessionIDs),
 	)
 	rows, err := c.conn.Query(ctx, q)
