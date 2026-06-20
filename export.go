@@ -174,8 +174,8 @@ func (c *Client) buildExportSQL(matchedSQL string) (string, error) {
 			sb.WriteString(", ")
 			sb.WriteString(bare)
 		}
-		fmt.Fprintf(&sb, "\n        FROM %s FINAL\n        ORDER BY session_id ASC, %s ASC\n    )\n    GROUP BY session_id, packet_id\n)",
-			c.tableRef(components.ComponentTable(proto)), proto.FetchOrderBy())
+		fmt.Fprintf(&sb, "\n        FROM %s\n        INNER JOIN matched USING (session_id, packet_id)\n        ORDER BY session_id ASC, %s ASC\n        LIMIT 1 BY session_id, %s\n    )\n    GROUP BY session_id, packet_id\n)",
+			c.tableRef(components.ComponentTable(proto)), proto.FetchOrderBy(), proto.FetchOrderBy())
 	}
 
 	// --- SELECT (nucleus + all components in KnownComponentKinds order) ---
@@ -200,7 +200,12 @@ func (c *Client) buildExportSQL(matchedSQL string) (string, error) {
 	}
 
 	// --- FROM + JOINs (same KnownComponentKinds order) ---
-	fmt.Fprintf(&sb, "\nFROM %s AS p FINAL\nINNER JOIN matched USING (session_id, packet_id)\n", c.packetsTable())
+	// Start FROM matched (already deduplicated via LIMIT 1 BY in IDsSQL) and
+	// use ANY JOINs so that unmerged ReplacingMergeTree duplicates contribute
+	// at most one row per (session_id, packet_id) from each table.  This avoids
+	// both the full-table scan that FINAL causes and the multiplicative row
+	// expansion that plain JOINs cause when multiple tables contain duplicates.
+	fmt.Fprintf(&sb, "\nFROM matched\nANY INNER JOIN %s AS p USING (session_id, packet_id)\n", c.packetsTable())
 
 	for _, kind := range components.KnownComponentKinds {
 		proto := components.ComponentFactories[kind]()
@@ -209,7 +214,7 @@ func (c *Client) buildExportSQL(matchedSQL string) (string, error) {
 		if components.OrderRepeatable[proto.Order()] {
 			fmt.Fprintf(&sb, "LEFT JOIN %s_agg USING (session_id, packet_id)\n", alias)
 		} else {
-			fmt.Fprintf(&sb, "LEFT JOIN %s AS %s USING (session_id, packet_id)\n", c.tableRef(components.ComponentTable(proto)), alias)
+			fmt.Fprintf(&sb, "ANY LEFT JOIN %s AS %s USING (session_id, packet_id)\n", c.tableRef(components.ComponentTable(proto)), alias)
 		}
 	}
 
